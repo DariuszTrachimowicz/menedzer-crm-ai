@@ -50,9 +50,12 @@ final class Store
         return $row !== null && (int) $row['count'] <= $limit;
     }
 
+    /** Adres klienta do limitów. Za lokalnym proxy (CloudPanel) bierzemy X-Real-IP, bo REMOTE_ADDR to 127.0.0.1. */
     public static function ip(): string
     {
-        return (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $real = (string) ($_SERVER['HTTP_X_REAL_IP'] ?? '');
+        return in_array($remote, ['127.0.0.1', '::1'], true) && filter_var($real, FILTER_VALIDATE_IP) ? $real : $remote;
     }
 
     public static function lock(string $name, int $timeout = 3): bool

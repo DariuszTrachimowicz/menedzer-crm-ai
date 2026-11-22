@@ -53,7 +53,3 @@ $sql = [
 foreach ($sql as $query) {
     $CI->db->query($query . $suffix);
 }
-
-if (get_option('mcai_install_id') === '') {
-    add_option('mcai_install_id', bin2hex(random_bytes(16)), 0);
-}
