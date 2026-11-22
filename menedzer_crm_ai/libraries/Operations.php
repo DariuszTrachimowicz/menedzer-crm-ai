@@ -102,7 +102,7 @@ final class Operations
     public static function call(array $c, string $level, string $tool, array $a): array
     {
         if (in_array($tool, ['crm_operation_execute', 'crm_operation_rollback'], true) && $a['confirm'] !== true) {
-            throw new Failure('confirm_required', 'Wymagane confirm=true.');
+            throw new Failure('confirm_required', _l('mcai_op_confirm'));
         }
         switch ($tool) {
             case 'crm_operation_preview':
@@ -131,14 +131,14 @@ final class Operations
             $purifier = new \HTMLPurifier($config);
         }
         if (!$purifier) {
-            throw new Failure('invalid_change', 'Ten CRM nie ma oczyszczacza HTML; pole przyjmuje tylko zapis przez panel.');
+            throw new Failure('invalid_change', _l('mcai_op_no_purifier'));
         }
         return $purifier->purify($html);
     }
 
     private static function value(string $field, string $type, $v)
     {
-        $bad = fn () => new Failure('invalid_change', "Nieprawidłowa wartość pola $field.");
+        $bad = fn () => new Failure('invalid_change', sprintf(_l('mcai_op_bad_value'), $field));
         [$kind, $arg] = array_pad(explode(':', $type, 2), 2, '');
         switch ($kind) {
             case 'text':
@@ -180,12 +180,12 @@ final class Operations
                 return $v;
             case 'ref':
                 [$table, $col] = explode('.', $arg);
-                if (!is_int($v) || !Store::db()->where($col, $v)->count_all_results(db_prefix() . $table)) {
+                if (!is_int($v) || Store::db()->query('SELECT `' . $col . '` FROM `' . db_prefix() . $table . '` WHERE `' . $col . '`=? LOCK IN SHARE MODE', [$v])->num_rows() === 0) {
                     throw $bad();
                 }
                 return $v;
             case 'staff':
-                if (!is_int($v) || !Store::db()->where('staffid', $v)->where('active', 1)->count_all_results(db_prefix() . 'staff')) {
+                if (!is_int($v) || Store::db()->query('SELECT staffid FROM `' . db_prefix() . 'staff` WHERE staffid=? AND active=1 LOCK IN SHARE MODE', [$v])->num_rows() === 0) {
                     throw $bad();
                 }
                 return $v;
@@ -203,7 +203,7 @@ final class Operations
         $out = [];
         foreach ($change as $k => $v) {
             if (!isset($def['f'][$k])) {
-                throw new Failure('invalid_change', "Pole $k nie jest dozwolone w tej akcji.");
+                throw new Failure('invalid_change', sprintf(_l('mcai_op_field_not_allowed'), $k));
             }
             // null czyści pole tylko przy zmianie istniejącego rekordu.
             $out[$k] = $v === null && !$create ? null : self::value($k, $def['f'][$k], $v);
@@ -211,11 +211,11 @@ final class Operations
         if ($create) {
             foreach ($def['req'] ?? [] as $r) {
                 if (!isset($out[$r]) || $out[$r] === '') {
-                    throw new Failure('invalid_change', "Brak wymaganego pola $r.");
+                    throw new Failure('invalid_change', sprintf(_l('mcai_op_field_required'), $r));
                 }
             }
         } elseif (!$out) {
-            throw new Failure('invalid_change', 'Brak pól do zmiany.');
+            throw new Failure('invalid_change', _l('mcai_op_no_fields'));
         }
         return $out;
     }
@@ -234,7 +234,7 @@ final class Operations
                     throw $deny();
                 }
                 if (isset($change['rel_type']) !== isset($change['rel_id'])) {
-                    throw new Failure('invalid_change', 'Podaj razem rel_type i rel_id.');
+                    throw new Failure('invalid_change', _l('mcai_op_rel_pair'));
                 }
                 $map = ['customer' => 'customers', 'project' => 'projects', 'lead' => 'leads', 'ticket' => 'tickets'];
                 if (isset($change['rel_type']) && !$visible($map[$change['rel_type']], $change['rel_id'])) {
@@ -247,12 +247,12 @@ final class Operations
                     throw $deny();
                 }
                 if ((int) $current['visible_to_client'] === 1 && array_intersect(array_keys($change), ['name', 'description'])) {
-                    throw $deny('Zadanie jest widoczne dla klienta: nazwę i opis zmienia pracownik.');
+                    throw $deny(_l('mcai_op_task_visible_edit'));
                 }
                 return;
             case 'task.comment':
                 if ((int) $current['visible_to_client'] === 1) {
-                    throw $deny('Zadanie jest widoczne dla klienta: komentarz dodaje pracownik.');
+                    throw $deny(_l('mcai_op_task_visible_comment'));
                 }
                 return;
             case 'note.create':
@@ -270,7 +270,7 @@ final class Operations
                     throw $deny();
                 }
                 if ((int) $current['active'] === 1) {
-                    throw $deny('Artykuł jest opublikowany: zmienia go pracownik w panelu.');
+                    throw $deny(_l('mcai_op_kb_published'));
                 }
                 return;
             case 'customer.create':
@@ -321,7 +321,7 @@ final class Operations
     /** Widoczność rekordu powiązanego, z blokadą współdzieloną do końca transakcji. */
     private static function visible(string $resource, int $id, int $sid): bool
     {
-        $scope = Resources::scope($resource, $sid);
+        $scope = Resources::scope($resource, $sid, true);
         if ($scope === null || $scope[0] === 'limited') {
             return false;
         }
@@ -349,7 +349,7 @@ final class Operations
         if ($resource === null) {
             return null;
         }
-        $scope = Resources::scope($resource, $sid);
+        $scope = Resources::scope($resource, $sid, $lock);
         $rdef = Resources::map()[$resource];
         if ($scope === null || $scope[0] === 'limited' || !$id) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
@@ -383,13 +383,16 @@ final class Operations
         $create = $def['mode'] === 'create';
         $needsTarget = !$create || isset($def['parent']);
         if ($needsTarget !== ($target !== null)) {
-            throw new Failure('invalid_change', $needsTarget ? 'Brak target_id.' : 'Ta akcja nie przyjmuje target_id.');
+            throw new Failure('invalid_change', $needsTarget ? _l('mcai_op_target_missing') : _l('mcai_op_target_unexpected'));
         }
         $change = self::normalize($def, $change, $create);
         $current = self::target($def, $target, $sid, false);
         self::authorize($action, $sid, $change, $current);
         self::checkContact($action, $change, $target);
         $scope = $create ? null : Resources::scope($def['resource'], $sid);
+        if (!$create && ($scope === null || $scope[0] === 'limited')) {
+            throw new Failure('not_found', _l('mcai_err_not_found'), 404);
+        }
         $before = $create ? [] : self::snapshot($def, $target, self::columns($action, $change), false, $scope[1] ?? null);
         if ($before === null) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
@@ -404,7 +407,7 @@ final class Operations
         ]);
         return ['operation_id' => $id, 'status' => 'previewed', 'action' => $action, 'target_id' => $target, 'before' => $before ?: null, 'after' => $change,
             'rollback' => self::rollbackable($def), 'expires_at' => date('c', time() + self::TTL),
-            'next' => 'Pokaż podgląd użytkownikowi; po akceptacji crm_operation_execute z confirm=true.'];
+            'next' => _l('mcai_op_next')];
     }
 
     /** Unikalny e-mail kontaktu. Przy wykonaniu i cofnięciu wołane pod blokadą „contacts” trzymaną do commitu. */
@@ -418,7 +421,7 @@ final class Operations
             $db->where('id !=', (int) $target);
         }
         if ($db->count_all_results(db_prefix() . 'contacts') > 0) {
-            throw new Failure('invalid_change', 'Kontakt z tym adresem e-mail już istnieje.');
+            throw new Failure('invalid_change', _l('mcai_op_email_exists'));
         }
     }
 
@@ -462,7 +465,7 @@ final class Operations
         $peek = self::load($c, $id, false);
         $contacts = str_starts_with($peek['action'], 'contact.');
         if ($contacts && !Store::lock('contacts', 5)) {
-            throw self::fail('busy', 'Spróbuj ponownie za chwilę.');
+            throw self::fail('busy', _l('mcai_op_busy'));
         }
         try {
             if (!$db->trans_begin()) {
@@ -485,7 +488,7 @@ final class Operations
                 $plan = json_decode($op['plan'], true);
                 $def = self::actions()[$op['action']] ?? null;
                 if (!is_array($plan) || ($plan['v'] ?? 0) !== self::PLAN_VERSION || !$def) {
-                    throw self::fail('expired', 'Ta operacja pochodzi ze starszej wersji modułu. Przygotuj nowy podgląd.', 'expired');
+                    throw self::fail('expired', _l('mcai_op_old_plan'), 'expired');
                 }
                 if (!Levels::atLeast($level, $def['level'])) {
                     throw new Failure('forbidden', _l('mcai_err_level'), 403);
@@ -506,7 +509,7 @@ final class Operations
                     throw $e;
                 }
                 log_message('error', 'Menedzer CRM AI operacja: ' . $e->getMessage());
-                throw new Failure('failed', 'Zapis nie powiódł się; nic nie zostało zmienione.', 500);
+                throw new Failure('failed', _l('mcai_op_failed'), 500);
             }
         } finally {
             if ($contacts) {
@@ -523,16 +526,16 @@ final class Operations
                 if ($op['execution_key'] === $keyHash) {
                     return [$op['status'], []]; // to samo wykonanie: zwracamy zapisany wynik
                 }
-                throw self::fail('already_executed', 'Ta operacja została już wykonana albo zamknięta.');
+                throw self::fail('already_executed', _l('mcai_op_already'));
             }
             if ((int) $op['expires_at'] < time()) {
-                throw self::fail('expired', 'Podgląd wygasł. Przygotuj nowy.', 'expired');
+                throw self::fail('expired', _l('mcai_op_expired'), 'expired');
             }
             $create = $def['mode'] === 'create';
             // Plan musi być dokładnie tym z podglądu i przejść bieżącą walidację bez żadnej zmiany treści.
             if (!hash_equals($op['plan_hash'], hash('sha256', Store::json($plan))) || $plan['action'] !== $op['action'] || (int) ($plan['target_id'] ?? 0) !== (int) $op['target_id']
                 || Store::json(self::normalize($def, $plan['change'], $create)) !== Store::json($plan['change'])) {
-                throw self::fail('expired', 'Plan operacji nie przechodzi bieżącej walidacji. Przygotuj nowy podgląd.', 'expired');
+                throw self::fail('expired', _l('mcai_op_plan_invalid'), 'expired');
             }
             $current = self::target($def, $plan['target_id'] ?? null, $sid, true);
             self::authorize($plan['action'], $sid, $plan['change'], $current);
@@ -549,7 +552,7 @@ final class Operations
         $cols = self::columns($plan['action'], $plan['change']);
         $now = self::snapshot($def, $target, $cols, true);
         if ($now === null || self::hash($now) !== $op['before_hash']) {
-            throw self::fail('conflict', 'Rekord zmienił się po podglądzie. Przygotuj nowy podgląd.', 'conflict');
+            throw self::fail('conflict', _l('mcai_op_changed_after_preview'), 'conflict');
         }
         $data = $plan['change'];
         if ($plan['action'] === 'task.update' && isset($data['status'])) {
@@ -636,7 +639,7 @@ final class Operations
     {
         return self::transact($c, $id, function (array $op, array $plan, array $def, int $sid) use ($c) {
             if ($op['status'] !== 'verified' || !self::rollbackable($def)) {
-                throw self::fail('rollback_unavailable', self::rollbackable($def) ? 'Cofnąć można tylko wykonaną i sprawdzoną operację.' : 'Tej akcji nie cofa AI. Rekord usuwa pracownik w panelu.');
+                throw self::fail('rollback_unavailable', self::rollbackable($def) ? _l('mcai_op_rollback_only_verified') : _l('mcai_op_rollback_not_ai'));
             }
             $db = Store::db();
             $p = db_prefix();
@@ -649,27 +652,34 @@ final class Operations
                 $keys = is_array($before) ? array_keys($before) : [];
                 sort($keys);
                 if ($keys !== $expected || self::hash($before) !== $op['before_hash']) {
-                    throw self::fail('rollback_unavailable', 'Kopia stanu nie pasuje do tej operacji.');
+                    throw self::fail('rollback_unavailable', _l('mcai_op_snapshot_mismatch'));
                 }
                 $restore = array_diff_key($before, ['datefinished' => 1]);
                 // Odtwarzane wartości muszą dziś przejść walidację (np. status zgłoszenia mógł zostać usunięty).
                 foreach ($restore as $k => $v) {
-                    if ($v === null) {
+                    $type = $def['f'][$k];
+                    // Perfex zapisuje „brak” jako 0 albo pusty tekst (np. brak kraju): to poprawny stan do odtworzenia.
+                    if ($v === null || $v === '' || ($v === '0' && preg_match('/^(ref|staff)/', $type))) {
                         continue;
                     }
-                    $type = $def['f'][$k];
                     $typed = preg_match('/^(int|ref|staff)/', $type) && is_numeric($v) ? (int) $v : $v;
                     try {
-                        self::value($k, $type, $typed);
+                        $clean = self::value($k, $type, $typed);
+                        if ($type === 'html' && $clean !== $v) {
+                            throw self::fail('conflict', _l('mcai_op_rollback_purify'));
+                        }
                     } catch (Failure $e) {
-                        throw self::fail('conflict', "Poprzednia wartość pola $k jest dziś nieprawidłowa. Nie cofam.");
+                        if ($e->codeName === 'conflict') {
+                            throw $e;
+                        }
+                        throw self::fail('conflict', sprintf(_l('mcai_op_old_value_invalid'), $k));
                     }
                 }
                 self::authorize($plan['action'], $sid, $restore, $current);
                 self::checkContact($plan['action'], $restore, (int) $plan['target_id']);
                 $now = self::snapshot($def, (int) $plan['target_id'], array_keys($before), true);
                 if ($now === null || self::hash($now) !== $op['after_hash']) {
-                    throw self::fail('conflict', 'Rekord zmienił się po tej operacji. Cofnięcie przywróciłoby cudze zmiany.');
+                    throw self::fail('conflict', _l('mcai_op_changed_after_op'));
                 }
                 $db->where($def['pk'], (int) $plan['target_id'])->update($p . $def['table'], $before);
                 if (self::hash(self::snapshot($def, (int) $plan['target_id'], array_keys($before), true)) !== self::hash($before)) {
@@ -681,15 +691,15 @@ final class Operations
                 $newId = (int) $op['new_id'];
                 $now = self::snapshot($def, $newId, null, true);
                 if ($now === null || $op['after_hash'] === '' || self::hash($now) !== $op['after_hash']) {
-                    throw self::fail('conflict', 'Wpis zmienił się po tej operacji. Nie cofam.');
+                    throw self::fail('conflict', _l('mcai_op_entry_changed'));
                 }
                 if ($plan['action'] === 'task.comment') {
                     // Reguła Perfexa (Tasks_model::remove_comment): po godzinie usuwa tylko administrator.
                     if (get_option('client_staff_add_edit_delete_task_comments_first_hour') == 1 && strtotime($now['dateadded']) < strtotime('-1 hours') && !is_admin($sid)) {
-                        throw self::fail('rollback_unavailable', 'Komentarz ma ponad godzinę; usuwa go administrator.');
+                        throw self::fail('rollback_unavailable', _l('mcai_op_comment_old'));
                     }
                     if ((int) $now['file_id'] !== 0 || $db->query("SELECT id FROM {$p}files WHERE task_comment_id=? LOCK IN SHARE MODE", [$newId])->num_rows() > 0) {
-                        throw self::fail('conflict', 'Do komentarza dołączono plik. Nie cofam.');
+                        throw self::fail('conflict', _l('mcai_op_comment_file'));
                     }
                 }
                 $db->where($def['pk'], $newId)->delete($p . $def['table']);

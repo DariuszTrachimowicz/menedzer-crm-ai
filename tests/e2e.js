@@ -229,6 +229,11 @@ async function authorize(page, clientId, scope) {
   const E = e2.token.body.access_token;
   const ecom = await tool(E, 'crm_operation_preview', { action: 'task.comment', target_id: 1, change: { content: 'Zrobione w połowie' } });
   check(!ecom.isError, 'Ewa może skomentować swoje zadanie', JSON.stringify(ecom.data));
+  // Wykonanie przez osobę z ograniczoną widocznością: blokady w podzapytaniach widoczności (LOCK IN SHARE MODE).
+  const ecx = await tool(E, 'crm_operation_execute', { operation_id: ecom.data.operation_id, confirm: true, idempotency_key: 'ewa1' });
+  check(!ecx.isError && ecx.data.status === 'verified', 'Ewa wykonuje komentarz (widoczność z blokadą)', JSON.stringify(ecx.data));
+  const erb = await tool(E, 'crm_operation_rollback', { operation_id: ecom.data.operation_id, confirm: true });
+  check(!erb.isError && erb.data.status === 'rolled_back', 'Ewa cofa własny komentarz', JSON.stringify(erb.data));
   const ecust = await tool(E, 'crm_operation_preview', { action: 'customer.create', change: { company: 'X' } });
   check(ecust.isError, 'Ewa (Praca) nie tworzy klientów', JSON.stringify(ecust.data));
   const eupd = await tool(E, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Zmiana' } });

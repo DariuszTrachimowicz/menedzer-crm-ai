@@ -86,6 +86,10 @@ final class Updater
         $old = $parent . '/menedzer_crm_ai.old-' . date('YmdHis');
         $tmp = tempnam(sys_get_temp_dir(), 'mcai');
         $swapped = false;
+        // Do końca aktualizacji i ewentualnego przywracania błąd SQL wraca jako false, a nie kończy procesu.
+        $db = Store::db();
+        $debug = $db->db_debug;
+        $db->db_debug = false;
         try {
             $zip = self::get('https://github.com/' . self::REPO . "/releases/download/v$version/menedzer_crm_ai-$version.zip", true, $status);
             if ($status !== 200 || $zip === null || strlen($zip) < 100) {
@@ -124,15 +128,10 @@ final class Updater
             }
             // Nowe tabele (CREATE IF NOT EXISTS) z kodu nowej wersji; install.php rzuca wyjątek przy błędzie SQL.
             // db_debug wyłączony, żeby błąd SQL wrócił jako false, a nie zakończył procesu przed przywróceniem.
-            $db = Store::db();
-            $debug = $db->db_debug;
-            $db->db_debug = false;
-            try {
-                require $dir . '/install.php';
-            } finally {
-                $db->db_debug = $debug;
+            require $dir . '/install.php';
+            if (!$db->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version])) {
+                throw $fail();
             }
-            $db->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
             $saved = $db->select('installed_version')->where('module_name', MCAI_MODULE)->get(db_prefix() . 'modules')->row_array();
             if (($saved['installed_version'] ?? '') !== $version) {
                 throw $fail();
@@ -142,8 +141,7 @@ final class Updater
             self::remove($old);
         } catch (\Throwable $e) {
             if ($swapped) {
-                // Przywrócenie poprzedniej wersji w miejsce nieudanej: numer w bazie i pliki.
-                Store::db()->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => MCAI_VERSION]);
+                // Przywrócenie poprzedniej wersji w miejsce nieudanej: najpierw pliki, potem numer w bazie.
                 $failed = $new . '-failed';
                 if (is_dir($dir) && !rename($dir, $failed)) {
                     log_message('error', 'Menedzer CRM AI: nie można odsunąć nieudanej wersji; poprzednia jest w ' . $old);
@@ -154,9 +152,13 @@ final class Updater
                     throw new Failure('update_failed', _l('mcai_update_restore') . ' ' . $old);
                 }
                 self::remove($failed);
+                if (!$db->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => MCAI_VERSION])) {
+                    log_message('error', 'Menedzer CRM AI: pliki przywrócone, ale numer wersji w bazie nie; ustaw installed_version=' . MCAI_VERSION);
+                }
             }
             throw $e instanceof Failure ? $e : $fail();
         } finally {
+            $db->db_debug = $debug;
             @unlink($tmp);
             self::remove($new);
             Store::unlock('update');

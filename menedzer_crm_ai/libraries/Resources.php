@@ -72,7 +72,18 @@ final class Resources
      * Zakres widoczności: null (brak dostępu), ['all'], ['own', warunek SQL] albo ['limited'] (tylko imiona pracowników).
      * Warunki odwzorowują get_*_where_sql_for_staff() i listy w kontrolerach Perfexa.
      */
-    public static function scope(string $resource, int $sid): ?array
+    public static function scope(string $resource, int $sid, bool $lock = false): ?array
+    {
+        // Z $lock podzapytania nadające widoczność blokują swoje wiersze do końca transakcji (MySQL: blokada
+        // w zapytaniu zewnętrznym nie obejmuje podzapytań).
+        $scope = self::scopeRaw($resource, $sid);
+        if (isset($scope[1])) {
+            $scope[1] = str_replace('/*L*/', $lock ? ' LOCK IN SHARE MODE' : '', $scope[1]);
+        }
+        return $scope;
+    }
+
+    private static function scopeRaw(string $resource, int $sid): ?array
     {
         $def = self::map()[$resource] ?? null;
         if (!$def) {
@@ -90,17 +101,17 @@ final class Resources
                     return ['all'];
                 }
                 // Perfex: bez prawa widoku klient jest widoczny dla swoich opiekunów (customer_admins).
-                return ['own', "userid IN (SELECT customer_id FROM {$p}customer_admins WHERE staff_id=$sid)"];
+                return ['own', "userid IN (SELECT customer_id FROM {$p}customer_admins WHERE staff_id=$sid/*L*/)"];
             case 'leads':
                 return $can('view') ? ['all'] : ['own', "(assigned=$sid OR addedfrom=$sid OR is_public=1)"];
             case 'tickets':
                 // Jak Tickets::ticket(): przy dostępie według działów przypisanie nie otwiera zgłoszenia z innego działu.
                 return get_option('staff_access_only_assigned_departments') == '1'
-                    ? ['own', "department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=$sid)"] : ['all'];
+                    ? ['own', "department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=$sid/*L*/)"] : ['all'];
             case 'tasks':
                 return $can('view') ? ['all'] : ['own', self::taskWhere($sid)];
             case 'projects':
-                return $can('view') ? ['all'] : ['own', "id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid)"];
+                return $can('view') ? ['all'] : ['own', "id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid/*L*/)"];
             case 'invoices':
             case 'estimates':
             case 'proposals':
@@ -114,9 +125,9 @@ final class Resources
                     return ['all'];
                 }
                 // Jak views/admin/tables/payments.php: pełny widok faktur nie daje pełnego widoku płatności.
-                $where = "invoiceid IN (SELECT id FROM {$p}invoices WHERE addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='invoices' AND capability='view_own'))";
+                $where = "invoiceid IN (SELECT id FROM {$p}invoices WHERE addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='invoices' AND capability='view_own'/*L*/)/*L*/)";
                 if (get_option('allow_staff_view_invoices_assigned') == 1) {
-                    $where .= " OR invoiceid IN (SELECT id FROM {$p}invoices WHERE sale_agent=$sid)";
+                    $where .= " OR invoiceid IN (SELECT id FROM {$p}invoices WHERE sale_agent=$sid/*L*/)";
                 }
                 return ['own', "($where)"];
             case 'knowledge_base':
@@ -136,9 +147,9 @@ final class Resources
     public static function taskWhere(int $sid): string
     {
         $p = db_prefix();
-        $w = "(id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=$sid) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=$sid) OR (addedfrom=$sid AND is_added_from_contact=0)";
+        $w = "(id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=$sid/*L*/) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=$sid/*L*/) OR (addedfrom=$sid AND is_added_from_contact=0)";
         if (get_option('show_all_tasks_for_project_member') == 1) {
-            $w .= " OR (rel_type='project' AND rel_id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid))";
+            $w .= " OR (rel_type='project' AND rel_id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid/*L*/))";
         }
         return $w . ' OR is_public=1)';
     }
@@ -150,7 +161,7 @@ final class Resources
         $agent = $resource === 'proposals' ? 'assigned' : 'sale_agent';
         $assignedAllowed = get_option('allow_staff_view_' . $resource . '_assigned') == 1;
         if (staff_can('view_own', $resource, $sid)) {
-            return "((addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='$resource' AND capability='view_own'))" . ($assignedAllowed ? " OR $agent=$sid" : '') . ')';
+            return "((addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='$resource' AND capability='view_own'/*L*/))" . ($assignedAllowed ? " OR $agent=$sid" : '') . ')';
         }
         return $assignedAllowed ? "$agent=$sid" : null;
     }
