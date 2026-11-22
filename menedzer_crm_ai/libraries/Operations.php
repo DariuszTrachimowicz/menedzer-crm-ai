@@ -581,7 +581,8 @@ final class Operations
         }
         $data = $plan['change'];
         if ($plan['action'] === 'task.update' && isset($data['status'])) {
-            $data['datefinished'] = (int) $data['status'] === 5 ? date('Y-m-d H:i:s') : null;
+            // Ponowne „ukończone” zachowuje pierwotną datę ukończenia (raporty za okres).
+            $data['datefinished'] = (int) $data['status'] === 5 ? ((int) $now['status'] === 5 ? $now['datefinished'] : date('Y-m-d H:i:s')) : null;
         }
         if ($plan['action'] === 'project.update' && isset($data['status'])) {
             if ((int) $data['status'] === 4) {
@@ -608,6 +609,9 @@ final class Operations
             case 'task.create':
                 $row = array_diff_key($ch, ['assignees' => 1]) + ['description' => '', 'priority' => 2, 'status' => 1, 'startdate' => date('Y-m-d'), 'dateadded' => $now, 'addedfrom' => $sid, 'is_public' => 0, 'billable' => 0];
                 $row['visible_to_client'] = 0;
+                if ((int) $row['status'] === 5) {
+                    $row['datefinished'] = $now;
+                }
                 break;
             case 'task.comment':
                 $row = ['content' => $ch['content'], 'taskid' => (int) $plan['target_id'], 'staffid' => $sid, 'contact_id' => 0, 'file_id' => 0, 'dateadded' => $now];
