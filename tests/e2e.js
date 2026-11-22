@@ -238,6 +238,8 @@ async function authorize(page, clientId, scope) {
   check(ecust.isError, 'Ewa (Praca) nie tworzy klientów', JSON.stringify(ecust.data));
   const eupd = await tool(E, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Zmiana' } });
   check(eupd.isError && eupd.data.error === 'forbidden', 'Ewa bez prawa edycji zadań zmienia tylko status', JSON.stringify(eupd.data));
+  const etask = await tool(E, 'crm_resource_get', { resource: 'tasks', id: 1 });
+  check(!etask.isError && !('hourly_rate' in etask.data.item), 'bez prawa edycji zadań stawka cudzego zadania ukryta', JSON.stringify(etask.data.item));
   const estaff = await tool(E, 'crm_resource_get', { resource: 'staff', id: 1 });
   check(!estaff.isError && estaff.data.item.firstname && !('email' in estaff.data.item) && !('last_login' in estaff.data.item), 'bez prawa do personelu tylko imię i nazwisko', JSON.stringify(estaff.data));
 

@@ -152,3 +152,4 @@ $lang['mcai_op_field_required'] = 'Required field %s is missing.';
 $lang['mcai_op_old_value_invalid'] = 'The previous value of field %s is no longer valid. Not rolling back.';
 $lang['mcai_op_task_timer'] = 'A timer is running on this task. Stop it in the panel, then close the task.';
 $lang['mcai_op_lead_locked'] = 'The lead was converted to a customer and is locked; an administrator edits it.';
+$lang['mcai_op_not_member'] = 'Only members of the project team can be assigned to a project task.';

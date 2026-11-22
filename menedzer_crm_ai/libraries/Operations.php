@@ -240,6 +240,14 @@ final class Operations
                 if (isset($change['rel_type']) && !$visible($map[$change['rel_type']], $change['rel_id'])) {
                     throw $deny();
                 }
+                // Do zadania projektowego tylko członkowie zespołu projektu (jak w panelu); wiersze zablokowane do commitu.
+                if (($change['rel_type'] ?? '') === 'project') {
+                    foreach ($change['assignees'] ?? [] as $staff) {
+                        if (Store::db()->query('SELECT id FROM ' . db_prefix() . 'project_members WHERE project_id=? AND staff_id=? LOCK IN SHARE MODE', [$change['rel_id'], $staff])->num_rows() === 0) {
+                            throw $deny(_l('mcai_op_not_member'));
+                        }
+                    }
+                }
                 return;
             case 'task.update':
                 $assigned = Store::db()->query('SELECT id FROM ' . db_prefix() . 'task_assigned WHERE taskid=? AND staffid=? LOCK IN SHARE MODE', [(int) $current['id'], $sid])->num_rows() > 0;

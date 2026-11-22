@@ -89,6 +89,10 @@ final class Resources
         if (!$def) {
             return null;
         }
+        // Prywatne wydarzenie widzi tylko właściciel, także wobec administratora (Utilities::view_event).
+        if ($resource === 'events') {
+            return ['own', "(userid=$sid OR public=1)"];
+        }
         if (is_admin($sid)) {
             return ['all'];
         }
@@ -278,7 +282,20 @@ final class Resources
         if ($row === null) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
         }
-        return ['resource' => $resource, 'id' => $id, 'item' => self::clean($row, self::GET_TEXT), 'related' => $scope[0] === 'limited' ? [] : self::related($resource, $id, $row, $sid)];
+        $related = $scope[0] === 'limited' ? [] : self::related($resource, $id, $row, $sid);
+        return ['resource' => $resource, 'id' => $id, 'item' => self::clean(self::money($resource, $row, $sid), self::GET_TEXT), 'related' => $related];
+    }
+
+    /** Pola rozliczeniowe tylko dla tych, którym pokazuje je panel Perfexa. */
+    private static function money(string $resource, array $row, int $sid): array
+    {
+        if ($resource === 'tasks' && !staff_can('edit', 'tasks', $sid) && (int) ($row['addedfrom'] ?? 0) !== $sid) {
+            unset($row['hourly_rate']); // view_task_template: autor zadania albo prawo edycji
+        }
+        if ($resource === 'projects' && !staff_can('edit', 'projects', $sid)) {
+            unset($row['billing_type'], $row['project_cost'], $row['project_rate_per_hour'], $row['estimated_hours']);
+        }
+        return $row;
     }
 
     /** Rekord widoczny dla pracownika (kolumny z listy) albo null. */
