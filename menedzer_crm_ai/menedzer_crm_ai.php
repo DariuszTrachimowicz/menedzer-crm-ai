@@ -35,8 +35,19 @@ function mcai_uninstall()
     }
 }
 
+// Sprzątanie historii (30 dni), wygasłych zgód, tokenów i nieużytych rejestracji przy cronie Perfexa.
+hooks()->add_action('after_cron_run', function () {
+    Mcai\Store::cleanup();
+});
+
 hooks()->add_action('admin_init', function () {
     if (!is_admin()) {
+        // Pracownik z listy uprawnionych widzi moduł w menu bocznym, żeby zarządzać swoimi połączeniami.
+        if (is_staff_logged_in() && Mcai\Operators::level((int) get_staff_user_id()) !== null) {
+            get_instance()->app_menu->add_sidebar_menu_item('menedzer-crm-ai', [
+                'href' => admin_url(MCAI_MODULE), 'name' => _l('mcai_name'), 'icon' => 'fa-solid fa-robot', 'position' => 60,
+            ]);
+        }
         return;
     }
     get_instance()->app_menu->add_setup_menu_item('menedzer-crm-ai', [

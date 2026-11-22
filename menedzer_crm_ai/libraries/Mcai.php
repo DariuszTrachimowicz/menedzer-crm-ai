@@ -11,6 +11,7 @@ require_once __DIR__ . '/Resources.php';
 require_once __DIR__ . '/Operations.php';
 require_once __DIR__ . '/Tools.php';
 require_once __DIR__ . '/Server.php';
+require_once __DIR__ . '/Updater.php';
 
 final class Failure extends \RuntimeException
 {

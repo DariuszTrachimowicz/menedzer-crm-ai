@@ -16,11 +16,15 @@ $csrf = '<input type="hidden" name="' . mcai_e($this->security->get_csrf_token_n
 <div class="panel_s"><div class="panel-body">
 
 <?php if ($tab === 'start') { ?>
+<?php if (!empty($update)) { ?>
+<div class="alert alert-info"><?= mcai_e(_l('mcai_update_available')) ?> <strong><?= mcai_e($update) ?></strong>
+<form method="post" action="<?= admin_url(MCAI_MODULE . '/update') ?>" class="tw-inline"><?= $csrf ?><input type="hidden" name="version" value="<?= mcai_e($update) ?>"><button class="btn btn-primary btn-sm tw-ml-2"><?= mcai_e(_l('mcai_update_now')) ?></button></form></div>
+<?php } ?>
 <h4><?= mcai_e(_l('mcai_start_title')) ?></h4>
 <p><?= mcai_e(_l('mcai_start_intro')) ?></p>
 <label for="mcai-url"><?= mcai_e(_l('mcai_mcp_url')) ?></label>
 <div class="input-group tw-max-w-2xl"><input id="mcai-url" class="form-control" readonly value="<?= mcai_e($mcpUrl) ?>"><span class="input-group-btn"><button class="btn btn-default" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcai-url').value);this.textContent='<?= mcai_e(_l('mcai_copied')) ?>'"><?= mcai_e(_l('mcai_copy')) ?></button></span></div>
-<ol class="tw-mt-4">
+<ol class="tw-mt-4 tw-list-decimal tw-pl-5 tw-space-y-1">
 <li><?= mcai_e(_l('mcai_start_step1')) ?></li>
 <li><?= mcai_e(_l('mcai_start_step2')) ?></li>
 <li><?= mcai_e(_l('mcai_start_step3')) ?></li>

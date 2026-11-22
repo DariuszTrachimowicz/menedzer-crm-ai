@@ -38,6 +38,7 @@ class Menedzer_crm_ai extends AdminController
         ];
         if ($tab === 'start') {
             $data['checks'] = $this->input->get('check') ? $this->diagnostics() : null;
+            $data['update'] = is_admin() ? Mcai\Updater::available() : null;
         } elseif ($tab === 'connections') {
             $data['connections'] = Connections::forStaff(is_admin() ? null : $this->me);
             $data['names'] = $this->staffNames();
@@ -125,6 +126,21 @@ class Menedzer_crm_ai extends AdminController
             $this->back('connections');
         } catch (Failure $e) {
             $this->back('connections', $e->getMessage(), 'danger');
+        }
+    }
+
+    public function update()
+    {
+        $this->onlyAdmin();
+        $version = Mcai\Updater::available();
+        if ($version === null || $version !== $this->input->post('version')) {
+            $this->back('start', _l('mcai_update_failed'), 'danger');
+        }
+        try {
+            Mcai\Updater::update($version);
+            $this->back('start', _l('mcai_updated') . ' ' . $version);
+        } catch (Failure $e) {
+            $this->back('start', $e->getMessage(), 'danger');
         }
     }
 

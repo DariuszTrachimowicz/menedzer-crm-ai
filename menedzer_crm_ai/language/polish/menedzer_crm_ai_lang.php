@@ -115,3 +115,7 @@ $lang['mcai_err_query'] = 'Wpisz co najmniej 2 znaki.';
 $lang['mcai_err_tool'] = 'Narzędzie nie jest dostępne dla tego połączenia.';
 $lang['mcai_err_server'] = 'Błąd serwera. Szczegóły są w dzienniku CRM.';
 $lang['mcai_draft_reply'] = 'Szkic odpowiedzi AI, do wysłania przez pracownika';
+$lang['mcai_update_available'] = 'Dostępna nowa wersja modułu:';
+$lang['mcai_update_now'] = 'Aktualizuj teraz';
+$lang['mcai_update_failed'] = 'Aktualizacja nie powiodła się. Moduł działa w dotychczasowej wersji.';
+$lang['mcai_updated'] = 'Zaktualizowano do wersji';
