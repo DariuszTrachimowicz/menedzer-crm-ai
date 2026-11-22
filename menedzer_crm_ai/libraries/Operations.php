@@ -656,6 +656,10 @@ final class Operations
         if ($newId < 1) {
             throw new \RuntimeException('insert');
         }
+        // Jak Clients::client(): twórca bez prawa podglądu wszystkich klientów zostaje opiekunem, żeby nie stracić dostępu.
+        if ($plan['action'] === 'customer.create' && !staff_can('view', 'customers', $sid)) {
+            $db->insert($p . 'customer_admins', ['staff_id' => $sid, 'customer_id' => $newId, 'date_assigned' => $now]);
+        }
         foreach ($ch['assignees'] ?? [] as $staff) {
             $db->insert($p . 'task_assigned', ['staffid' => $staff, 'taskid' => $newId, 'assigned_from' => $sid, 'is_assigned_from_contact' => 0]);
         }

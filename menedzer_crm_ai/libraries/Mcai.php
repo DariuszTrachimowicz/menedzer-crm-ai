@@ -99,7 +99,11 @@ final class Store
         $db->query('DELETE FROM `' . self::table('audit') . '` WHERE created_at<?', [$now - 30 * 86400]);
         $db->query('DELETE FROM `' . self::table('limits') . '` WHERE `window`<?', [$now - 2 * 86400]);
         $db->query('DELETE FROM `' . self::table('oauth_consents') . '` WHERE expires_at<?', [$now - 600]);
-        $db->query("DELETE FROM `" . self::table('operations') . "` WHERE created_at<? AND status IN ('verified','rolled_back','expired','failed','denied')", [$now - 30 * 86400]);
+        // Operacje (z kopiami danych przed i po) znikają po 30 dniach w każdym stanie; porzucone podglądy,
+        // konflikty i wygasłe już po dobie, bo nie da się ich wykonać, a przechowują dane kontaktów.
+        $ops = self::table('operations');
+        $db->query("DELETE FROM `$ops` WHERE created_at<?", [$now - 30 * 86400]);
+        $db->query("DELETE FROM `$ops` WHERE created_at<? AND status IN ('previewed','conflict','expired')", [$now - 86400]);
         OAuth::cleanup();
     }
 }
