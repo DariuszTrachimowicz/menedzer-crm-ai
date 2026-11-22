@@ -58,59 +58,82 @@ final class Updater
         return $latest && version_compare($latest, MCAI_VERSION, '>') ? $latest : null;
     }
 
-    /** Pobiera paczkę, sprawdza jej zawartość i podmienia katalog modułu w dwóch szybkich krokach rename. */
+    /**
+     * Pobiera paczkę, sprawdza ją i podmienia katalog modułu. Poprzednia wersja zostaje
+     * do końca instalacji tabel i wraca na miejsce, gdy którykolwiek krok się nie uda.
+     */
     public static function update(string $version): void
     {
+        $fail = fn () => new Failure('update_failed', _l('mcai_update_failed'));
         if (!preg_match('/^\d+\.\d+\.\d+$/', $version) || !class_exists('ZipArchive')) {
-            throw new Failure('update_failed', _l('mcai_update_failed'));
+            throw $fail();
         }
-        $zip = self::get('https://github.com/' . self::REPO . "/releases/download/v$version/menedzer_crm_ai-$version.zip", true, $status);
-        if ($status !== 200 || $zip === null || strlen($zip) < 100) {
-            throw new Failure('update_failed', _l('mcai_update_failed'));
+        if (!Store::lock('update', 0)) {
+            throw $fail(); // trwa inna aktualizacja
         }
-        $parent = dirname(__DIR__, 2);
-        $tmp = tempnam(sys_get_temp_dir(), 'mcai');
-        file_put_contents($tmp, $zip);
+        $dir = dirname(__DIR__);
+        $parent = dirname($dir);
         $new = $parent . '/menedzer_crm_ai.new-' . bin2hex(random_bytes(4));
         $old = $parent . '/menedzer_crm_ai.old-' . date('YmdHis');
+        $tmp = tempnam(sys_get_temp_dir(), 'mcai');
+        $swapped = false;
         try {
-            $za = new \ZipArchive();
-            if ($za->open($tmp) !== true) {
-                throw new Failure('update_failed', _l('mcai_update_failed'));
+            $zip = self::get('https://github.com/' . self::REPO . "/releases/download/v$version/menedzer_crm_ai-$version.zip", true, $status);
+            if ($status !== 200 || $zip === null || strlen($zip) < 100) {
+                throw $fail();
             }
+            file_put_contents($tmp, $zip);
+            $za = new \ZipArchive();
+            if ($za->open($tmp) !== true || $za->numFiles < 1 || $za->numFiles > 500) {
+                throw $fail();
+            }
+            $total = 0;
             $hasMain = false;
             for ($i = 0; $i < $za->numFiles; $i++) {
-                $name = $za->getNameIndex($i);
-                if (!str_starts_with($name, 'menedzer_crm_ai/') || str_contains($name, '..') || str_contains($name, '\\')) {
-                    throw new Failure('update_failed', _l('mcai_update_failed'));
+                $st = $za->statIndex($i);
+                $name = $st['name'];
+                $total += $st['size'];
+                if (!str_starts_with($name, 'menedzer_crm_ai/') || str_contains($name, '..') || str_contains($name, '\\') || $st['size'] > 5242880 || $total > 20971520) {
+                    throw $fail();
                 }
                 $hasMain = $hasMain || $name === 'menedzer_crm_ai/menedzer_crm_ai.php';
             }
-            $main = $za->getFromName('menedzer_crm_ai/menedzer_crm_ai.php');
-            if (!$hasMain || !is_string($main) || !preg_match('/^Version:\s*' . preg_quote($version, '/') . '\s*$/m', $main)) {
-                throw new Failure('update_failed', _l('mcai_update_failed'));
+            $main = $hasMain ? $za->getFromName('menedzer_crm_ai/menedzer_crm_ai.php') : false;
+            if (!is_string($main) || !preg_match('/^Version:\s*' . preg_quote($version, '/') . '\s*$/m', $main)) {
+                throw $fail();
             }
-            mkdir($new, 0755);
-            if (!$za->extractTo($new)) {
-                throw new Failure('update_failed', _l('mcai_update_failed'));
+            if (!mkdir($new, 0755) || !$za->extractTo($new)) {
+                throw $fail();
             }
             $za->close();
-            if (!rename(dirname(__DIR__), $old)) {
-                throw new Failure('update_failed', _l('mcai_update_failed'));
+            if (!rename($dir, $old)) {
+                throw $fail();
             }
-            if (!rename($new . '/menedzer_crm_ai', dirname(__DIR__))) {
-                rename($old, dirname(__DIR__)); // przywrócenie starej wersji
-                throw new Failure('update_failed', _l('mcai_update_failed'));
+            $swapped = true;
+            if (!rename($new . '/menedzer_crm_ai', $dir)) {
+                throw $fail();
             }
+            // Nowe tabele (CREATE IF NOT EXISTS) z kodu nowej wersji, potem numer wersji w Perfexie.
+            require $dir . '/install.php';
+            Store::db()->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
+            update_option('mcai_latest', Store::json(['checked' => 0, 'version' => '']));
+            $swapped = false;
+            self::remove($old);
+        } catch (\Throwable $e) {
+            if ($swapped) {
+                // Przywrócenie poprzedniej wersji w miejsce nieudanej.
+                if (is_dir($dir)) {
+                    rename($dir, $new . '-failed');
+                    self::remove($new . '-failed');
+                }
+                rename($old, $dir);
+            }
+            throw $e instanceof Failure ? $e : $fail();
         } finally {
             @unlink($tmp);
             self::remove($new);
+            Store::unlock('update');
         }
-        self::remove($old);
-        // Nowe tabele (CREATE IF NOT EXISTS) i numer wersji w Perfexie.
-        require dirname(__DIR__) . '/install.php';
-        Store::db()->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
-        update_option('mcai_latest', Store::json(['checked' => 0, 'version' => '']));
     }
 
     private static function remove(string $dir): void

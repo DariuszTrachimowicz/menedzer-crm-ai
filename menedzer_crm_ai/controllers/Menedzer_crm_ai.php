@@ -23,6 +23,10 @@ class Menedzer_crm_ai extends AdminController
         if ($this->level === null) {
             access_denied(_l('mcai_name'));
         }
+        // Zmiany tylko przez POST: CSRF Perfexa sprawdza wyłącznie POST, więc GET nie może niczego zmieniać.
+        if ($this->router->fetch_method() !== 'index' && strtoupper($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            show_error('POST', 405);
+        }
     }
 
     public function index()

@@ -15,6 +15,9 @@ require_once __DIR__ . '/Updater.php';
 
 final class Failure extends \RuntimeException
 {
+    /** Stan operacji do zapisania po wycofaniu transakcji (conflict, expired). */
+    public ?string $opStatus = null;
+
     public function __construct(public string $codeName, string $message = '', public int $status = 400)
     {
         parent::__construct($message !== '' ? $message : $codeName);
@@ -82,7 +85,9 @@ final class Store
     public static function secure(): bool
     {
         $url = parse_url(self::base());
-        $https = ($_SERVER['HTTPS'] ?? '') === 'on' || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443;
+        // X-Forwarded-Proto tylko od lokalnego proxy; z zewnątrz każdy może go ustawić.
+        $proxy = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true);
+        $https = strtolower((string) ($_SERVER['HTTPS'] ?? '')) === 'on' || ($proxy && ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
         $local = in_array($url['host'] ?? '', ['localhost', '127.0.0.1'], true);
         return (($url['scheme'] ?? '') === 'https' && $https) || $local;
     }
@@ -129,7 +134,7 @@ final class Operators
 {
     private static function staff(int $id): ?array
     {
-        $row = Store::db()->select('staffid,firstname,lastname,email,admin,active')->where('staffid', $id)->get(db_prefix() . 'staff')->row_array();
+        $row = Store::db()->select('staffid,firstname,lastname,email,admin,active,is_not_staff')->where('staffid', $id)->get(db_prefix() . 'staff')->row_array();
         return $row ?: null;
     }
 
@@ -137,7 +142,7 @@ final class Operators
     public static function level(int $staffId): ?string
     {
         $staff = self::staff($staffId);
-        if (!$staff || (int) $staff['active'] !== 1) {
+        if (!$staff || (int) $staff['active'] !== 1 || ((int) $staff['is_not_staff'] === 1 && (int) $staff['admin'] !== 1)) {
             return null;
         }
         if ((int) $staff['admin'] === 1) {
@@ -158,13 +163,13 @@ final class Operators
     {
         $s = db_prefix() . 'staff';
         $o = Store::table('operators');
-        return Store::db()->query("SELECT s.staffid,s.firstname,s.lastname,s.email FROM `$s` s LEFT JOIN `$o` o ON o.staff_id=s.staffid WHERE s.admin=0 AND s.active=1 AND o.staff_id IS NULL ORDER BY s.firstname")->result_array();
+        return Store::db()->query("SELECT s.staffid,s.firstname,s.lastname,s.email FROM `$s` s LEFT JOIN `$o` o ON o.staff_id=s.staffid WHERE s.admin=0 AND s.active=1 AND s.is_not_staff=0 AND o.staff_id IS NULL ORDER BY s.firstname")->result_array();
     }
 
     public static function set(int $staffId, string $level, int $by): void
     {
         $staff = self::staff($staffId);
-        if (!$staff || (int) $staff['admin'] === 1 || !Levels::valid($level)) {
+        if (!$staff || (int) $staff['admin'] === 1 || (int) $staff['is_not_staff'] === 1 || !Levels::valid($level)) {
             throw new Failure('invalid_operator', _l('mcai_err_operator'));
         }
         $db = Store::db();

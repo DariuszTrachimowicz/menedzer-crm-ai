@@ -6,7 +6,9 @@ const BASE = process.argv[2] || 'http://localhost:8088';
 const ISS = BASE + '/menedzer_crm_ai';
 const REDIRECT = 'http://127.0.0.1:33418/callback';
 let failures = 0;
-const check = (ok, name, extra = '') => { console.log((ok ? 'OK   ' : 'BŁĄD ') + name + (extra ? ' :: ' + extra : '')); if (!ok) failures++; };
+// Szczegóły tylko przy błędzie, bez tokenów i kodów: maskujemy wszystko, co wygląda jak poświadczenie.
+const mask = (s) => String(s).replace(/\b(oa|or|oc|mc)\.[a-f0-9.]{20,}/g, '$1.***');
+const check = (ok, name, extra = '') => { console.log((ok ? 'OK   ' : 'BŁĄD ') + name + (!ok && extra ? ' :: ' + mask(extra) : '')); if (!ok) failures++; };
 const b64 = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 async function form(url, fields) {
@@ -98,6 +100,9 @@ async function authorize(page, clientId, scope) {
   // 3. Refresh: rotacja i wykrycie powtórki
   const r1 = await form(ISS + '/oauth/token', { grant_type: 'refresh_token', client_id: client.client_id, refresh_token: a.token.body.refresh_token, resource: ISS + '/mcp' });
   check(r1.status === 200 && r1.body.refresh_token !== a.token.body.refresh_token, 'refresh rotuje token');
+  const r2 = await form(ISS + '/oauth/token', { grant_type: 'refresh_token', client_id: client.client_id, refresh_token: a.token.body.refresh_token, resource: ISS + '/mcp' });
+  const afterRefreshReplay = await rpc(r1.body.access_token, 'ping', {});
+  check(r2.status === 400 && afterRefreshReplay.status === 401, 'ponowny refresh tym samym tokenem zrywa połączenie (RFC 9700)', r2.status + '/' + afterRefreshReplay.status);
   const codeAgain = await form(ISS + '/oauth/token', { grant_type: 'authorization_code', client_id: client.client_id, code: a.code, redirect_uri: REDIRECT, code_verifier: a.verifier, resource: ISS + '/mcp' });
   check(codeAgain.status === 400 && codeAgain.body.error === 'invalid_grant', 'ponowne użycie kodu odrzucone');
   const afterReplay = await rpc(r1.body.access_token, 'ping', {});
@@ -194,7 +199,16 @@ async function authorize(page, clientId, scope) {
   const group = Number((await tool(T, 'crm_inventory')).data.lookups.kb_groups[0].id);
   const kb = await run('kb.create', { subject: 'Jak zresetować hasło', description: '<p>Kroki</p><script>alert(1)</script>', articlegroup: group });
   const kbg = await tool(T, 'crm_resource_get', { resource: 'knowledge_base', id: kb.ex.data.new_id });
-  check(kbg.data.item && kbg.data.item.active === '0' && !/script/.test(kbg.data.item.description), 'artykuł jako szkic, bez skryptu', JSON.stringify(kb.ex.data));
+  check(kbg.data.item && kbg.data.item.active === '0' && kbg.data.item.staff_article === '1' && !/script/.test(kbg.data.item.description), 'artykuł jako wewnętrzny szkic, bez skryptu', JSON.stringify(kb.ex.data));
+  const kbActive = await tool(T, 'crm_operation_preview', { action: 'kb.create', change: { subject: 'X', description: 'Y', articlegroup: group, active: 1 } });
+  check(kbActive.isError && kbActive.data.error === 'invalid_change', 'AI nie może opublikować artykułu (pole active odrzucone)');
+  const ctTarget = await tool(T, 'crm_operation_preview', { action: 'contact.create', target_id: 1, change: { userid: 1, firstname: 'A', lastname: 'B', email: 'ab@x.test' } });
+  check(ctTarget.isError && /target_id/.test(ctTarget.data.message), 'contact.create odrzuca zbędny target_id');
+  const badId = await tool(T, 'crm_operation_status', { operation_id: c1.pv.data.operation_id.toUpperCase() });
+  check(badId.isError && badId.data.error === 'invalid_arguments', 'id operacji tylko w postaci kanonicznej');
+  const getRevoke = await admin.page.goto(BASE + '/admin/menedzer_crm_ai/connections_revoke_all');
+  const stillOk = await rpc(T, 'ping', {});
+  check(getRevoke.status() === 405 && stillOk.status === 200, 'GET nie odcina połączeń (CSRF)', getRevoke.status() + '/' + stillOk.status);
 
   // 8. Ewa na poziomie Praca: komentarz tak, nowy klient nie
   await admin.page.goto(BASE + '/admin/menedzer_crm_ai?tab=operators');
@@ -209,6 +223,8 @@ async function authorize(page, clientId, scope) {
   check(ecust.isError, 'Ewa (Praca) nie tworzy klientów', JSON.stringify(ecust.data));
   const eupd = await tool(E, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Zmiana' } });
   check(eupd.isError && eupd.data.error === 'forbidden', 'Ewa bez prawa edycji zadań zmienia tylko status', JSON.stringify(eupd.data));
+  const estaff = await tool(E, 'crm_resource_get', { resource: 'staff', id: 1 });
+  check(!estaff.isError && estaff.data.item.firstname && !('email' in estaff.data.item) && !('last_login' in estaff.data.item), 'bez prawa do personelu tylko imię i nazwisko', JSON.stringify(estaff.data));
 
   await browser.close();
   console.log(failures ? `\n${failures} błędów` : '\nWSZYSTKO OK');

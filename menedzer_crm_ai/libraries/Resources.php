@@ -7,100 +7,161 @@ namespace Mcai;
 defined('BASEPATH') or exit('No direct script access allowed');
 
 /**
- * Odczyt danych CRM z uprawnieniami Perfexa. Każde zapytanie dostaje warunek widoczności
- * wynikający z roli pracownika (widok wszystkich, widok własnych albo brak dostępu).
+ * Odczyt danych CRM z uprawnieniami Perfexa. Widoczność odwzorowuje reguły Perfexa 3.x
+ * (widok wszystkich, widok własnych, przypisanie), a do AI trafiają tylko kolumny z jawnej listy.
  */
 final class Resources
 {
-    // Kolumny, które nigdy nie wychodzą do aplikacji AI (hasła, klucze, publiczne linki, podpisy).
-    private const SECRET = '/(password|pass_key|verification_key|two_factor|^token$|^hash$|secret|ticketkey|stripe_id|^signature$|acceptance_ip|last_ip|email_integration_uid)/i';
+    // Druga linia obrony: nazwy, które nie wyjdą nawet wtedy, gdy trafią na listę kolumn.
+    private const SECRET = '/(password|pass_key|verification_key|two_factor|token|^hash$|secret|ticketkey|stripe_id|signature|acceptance_ip|last_ip|api_key|short_link|email_integration_uid)/i';
     private const LIST_TEXT = 300;
     private const GET_TEXT = 20000;
 
-    /** Definicje zasobów. own: warunek widoku własnych, :sid zamieniane na id pracownika (int). */
     public static function map(): array
     {
-        $p = db_prefix();
+        $addr = ['billing_street', 'billing_city', 'billing_state', 'billing_zip', 'billing_country', 'shipping_street', 'shipping_city', 'shipping_state', 'shipping_zip', 'shipping_country'];
+        $money = ['currency', 'subtotal', 'total_tax', 'total', 'adjustment', 'discount_percent', 'discount_total', 'discount_type'];
         return [
             'customers' => ['table' => 'clients', 'pk' => 'userid', 'feature' => 'customers', 'date' => 'datecreated', 'status' => 'active',
                 'summary' => ['userid', 'company', 'vat', 'phonenumber', 'city', 'active', 'datecreated'], 'search' => ['company', 'vat', 'phonenumber', 'city'],
-                'own' => "userid IN (SELECT customer_id FROM {$p}customer_admins WHERE staff_id=:sid)"],
+                'columns' => array_merge(['userid', 'company', 'vat', 'phonenumber', 'country', 'city', 'zip', 'state', 'address', 'website', 'datecreated', 'active', 'leadid', 'default_language', 'default_currency', 'addedfrom'], $addr)],
             'contacts' => ['table' => 'contacts', 'pk' => 'id', 'feature' => 'customers', 'date' => 'datecreated', 'status' => 'active', 'customer' => 'userid',
                 'summary' => ['id', 'userid', 'firstname', 'lastname', 'email', 'phonenumber', 'title', 'is_primary', 'active'], 'search' => ['firstname', 'lastname', 'email', 'phonenumber'],
-                'own' => "userid IN (SELECT customer_id FROM {$p}customer_admins WHERE staff_id=:sid)"],
-            'leads' => ['table' => 'leads', 'pk' => 'id', 'feature' => 'leads', 'date' => 'dateadded', 'status' => 'status', 'assigned' => 'assigned', 'always_own' => true,
+                'columns' => ['id', 'userid', 'is_primary', 'firstname', 'lastname', 'email', 'phonenumber', 'title', 'datecreated', 'last_login', 'active', 'invoice_emails', 'estimate_emails', 'credit_note_emails', 'contract_emails', 'task_emails', 'project_emails', 'ticket_emails']],
+            'leads' => ['table' => 'leads', 'pk' => 'id', 'feature' => 'leads', 'date' => 'dateadded', 'status' => 'status', 'assigned' => 'assigned',
                 'summary' => ['id', 'name', 'company', 'email', 'phonenumber', 'status', 'source', 'assigned', 'lead_value', 'dateadded', 'lastcontact'], 'search' => ['name', 'company', 'email', 'phonenumber'],
-                'own' => '(assigned=:sid OR addedfrom=:sid OR is_public=1)'],
+                'columns' => ['id', 'name', 'title', 'company', 'description', 'country', 'zip', 'city', 'state', 'address', 'assigned', 'dateadded', 'status', 'source', 'lastcontact', 'dateassigned', 'last_status_change', 'addedfrom', 'email', 'website', 'phonenumber', 'date_converted', 'lost', 'junk', 'is_public', 'default_language', 'client_id', 'lead_value']],
             'tickets' => ['table' => 'tickets', 'pk' => 'ticketid', 'feature' => null, 'date' => 'date', 'status' => 'status', 'assigned' => 'assigned', 'customer' => 'userid',
                 'summary' => ['ticketid', 'subject', 'userid', 'contactid', 'email', 'name', 'department', 'priority', 'status', 'assigned', 'date', 'lastreply'], 'search' => ['subject', 'email', 'name', 'message'],
-                'own' => "(department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=:sid) OR assigned=:sid)"],
-            'tasks' => ['table' => 'tasks', 'pk' => 'id', 'feature' => 'tasks', 'date' => 'dateadded', 'status' => 'status', 'always_own' => true,
-                'summary' => ['id', 'name', 'status', 'priority', 'startdate', 'duedate', 'datefinished', 'rel_type', 'rel_id', 'addedfrom'], 'search' => ['name', 'description'],
-                'own' => "(is_public=1 OR addedfrom=:sid OR id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=:sid) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=:sid))"],
-            'projects' => ['table' => 'projects', 'pk' => 'id', 'feature' => 'projects', 'date' => 'project_created', 'status' => 'status', 'customer' => 'clientid', 'always_own' => true,
+                'columns' => ['ticketid', 'userid', 'contactid', 'merged_ticket_id', 'email', 'name', 'department', 'priority', 'status', 'service', 'subject', 'message', 'admin', 'date', 'project_id', 'lastreply', 'clientread', 'adminread', 'assigned', 'cc']],
+            'tasks' => ['table' => 'tasks', 'pk' => 'id', 'feature' => 'tasks', 'date' => 'dateadded', 'status' => 'status',
+                'summary' => ['id', 'name', 'status', 'priority', 'startdate', 'duedate', 'datefinished', 'rel_type', 'rel_id', 'addedfrom', 'visible_to_client'], 'search' => ['name', 'description'],
+                'columns' => ['id', 'name', 'description', 'priority', 'dateadded', 'startdate', 'duedate', 'datefinished', 'addedfrom', 'status', 'recurring', 'rel_id', 'rel_type', 'is_public', 'billable', 'billed', 'invoice_id', 'hourly_rate', 'milestone', 'visible_to_client']],
+            'projects' => ['table' => 'projects', 'pk' => 'id', 'feature' => 'projects', 'date' => 'project_created', 'status' => 'status', 'customer' => 'clientid',
                 'summary' => ['id', 'name', 'clientid', 'status', 'start_date', 'deadline', 'progress'], 'search' => ['name', 'description'],
-                'own' => "id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=:sid)"],
+                'columns' => ['id', 'name', 'description', 'status', 'clientid', 'billing_type', 'start_date', 'deadline', 'project_created', 'date_finished', 'progress', 'progress_from_tasks', 'project_cost', 'project_rate_per_hour', 'estimated_hours', 'addedfrom']],
             'invoices' => ['table' => 'invoices', 'pk' => 'id', 'feature' => 'invoices', 'date' => 'date', 'status' => 'status', 'customer' => 'clientid', 'assigned' => 'sale_agent',
                 'summary' => ['id', 'number', 'prefix', 'clientid', 'date', 'duedate', 'total', 'currency', 'status', 'sale_agent', 'sent'], 'search' => ['number', 'clientnote', 'adminnote'],
-                'own' => '(addedfrom=:sid OR sale_agent=:sid)'],
+                'columns' => array_merge(['id', 'sent', 'datesend', 'clientid', 'number', 'prefix', 'formatted_number', 'datecreated', 'date', 'duedate', 'addedfrom', 'status', 'clientnote', 'adminnote', 'recurring', 'terms', 'sale_agent', 'project_id'], $money, $addr)],
             'estimates' => ['table' => 'estimates', 'pk' => 'id', 'feature' => 'estimates', 'date' => 'date', 'status' => 'status', 'customer' => 'clientid', 'assigned' => 'sale_agent',
                 'summary' => ['id', 'number', 'prefix', 'clientid', 'date', 'expirydate', 'total', 'currency', 'status', 'sale_agent', 'sent'], 'search' => ['number', 'reference_no', 'clientnote', 'adminnote'],
-                'own' => '(addedfrom=:sid OR sale_agent=:sid)'],
+                'columns' => array_merge(['id', 'sent', 'datesend', 'clientid', 'project_id', 'number', 'prefix', 'formatted_number', 'datecreated', 'date', 'expirydate', 'addedfrom', 'status', 'clientnote', 'adminnote', 'invoiceid', 'invoiced_date', 'terms', 'reference_no', 'sale_agent', 'acceptance_firstname', 'acceptance_lastname', 'acceptance_email', 'acceptance_date'], $money, $addr)],
             'proposals' => ['table' => 'proposals', 'pk' => 'id', 'feature' => 'proposals', 'date' => 'date', 'status' => 'status', 'assigned' => 'assigned',
                 'summary' => ['id', 'subject', 'proposal_to', 'rel_type', 'rel_id', 'date', 'open_till', 'total', 'currency', 'status', 'assigned'], 'search' => ['subject', 'proposal_to', 'email'],
-                'own' => '(addedfrom=:sid OR assigned=:sid)'],
+                'columns' => array_merge(['id', 'subject', 'content', 'addedfrom', 'datecreated', 'open_till', 'date', 'rel_id', 'rel_type', 'assigned', 'proposal_to', 'project_id', 'country', 'zip', 'state', 'city', 'address', 'email', 'phone', 'status', 'estimate_id', 'invoice_id', 'date_converted', 'acceptance_firstname', 'acceptance_lastname', 'acceptance_email', 'acceptance_date'], $money)],
             'payments' => ['table' => 'invoicepaymentrecords', 'pk' => 'id', 'feature' => 'payments', 'date' => 'date',
                 'summary' => ['id', 'invoiceid', 'amount', 'paymentmode', 'date', 'transactionid'], 'search' => ['transactionid', 'note'],
-                'own' => "invoiceid IN (SELECT id FROM {$p}invoices WHERE addedfrom=:sid OR sale_agent=:sid)"],
+                'columns' => ['id', 'invoiceid', 'amount', 'paymentmode', 'paymentmethod', 'date', 'daterecorded', 'note', 'transactionid']],
             'knowledge_base' => ['table' => 'knowledge_base', 'pk' => 'articleid', 'feature' => 'knowledge_base', 'date' => 'datecreated', 'status' => 'active',
-                'summary' => ['articleid', 'subject', 'articlegroup', 'slug', 'active', 'staff_article', 'datecreated'], 'search' => ['subject', 'description'], 'own' => null],
+                'summary' => ['articleid', 'subject', 'articlegroup', 'slug', 'active', 'staff_article', 'datecreated'], 'search' => ['subject', 'description'],
+                'columns' => ['articleid', 'articlegroup', 'subject', 'description', 'slug', 'active', 'datecreated', 'article_order', 'staff_article']],
             'announcements' => ['table' => 'announcements', 'pk' => 'announcementid', 'feature' => null, 'date' => 'dateadded',
-                'summary' => ['announcementid', 'name', 'showtostaff', 'showtousers', 'dateadded'], 'search' => ['name', 'message'], 'own' => 'showtostaff=1'],
+                'summary' => ['announcementid', 'name', 'showtostaff', 'showtousers', 'dateadded'], 'search' => ['name', 'message'],
+                'columns' => ['announcementid', 'name', 'message', 'showtousers', 'showtostaff', 'showname', 'dateadded', 'userid']],
             'events' => ['table' => 'events', 'pk' => 'eventid', 'feature' => null, 'date' => 'start',
-                'summary' => ['eventid', 'title', 'start', 'end', 'public', 'userid'], 'search' => ['title', 'description'], 'own' => '(userid=:sid OR public=1)'],
-            'staff' => ['table' => 'staff', 'pk' => 'staffid', 'feature' => null, 'date' => 'datecreated', 'status' => 'active',
+                'summary' => ['eventid', 'title', 'start', 'end', 'public', 'userid'], 'search' => ['title', 'description'],
+                'columns' => ['eventid', 'title', 'description', 'userid', 'start', 'end', 'public', 'color']],
+            'staff' => ['table' => 'staff', 'pk' => 'staffid', 'feature' => 'staff', 'date' => 'datecreated', 'status' => 'active',
                 'summary' => ['staffid', 'firstname', 'lastname', 'email', 'phonenumber', 'active', 'admin'], 'search' => ['firstname', 'lastname', 'email'],
-                'columns' => ['staffid', 'firstname', 'lastname', 'email', 'phonenumber', 'active', 'admin', 'role', 'datecreated', 'last_login'], 'own' => null],
+                'columns' => ['staffid', 'firstname', 'lastname', 'email', 'phonenumber', 'active', 'admin', 'role', 'datecreated', 'last_login'],
+                'limited' => ['staffid', 'firstname', 'lastname', 'active']],
         ];
     }
 
-    /** 'all', 'own' albo null (brak dostępu) dla pracownika. */
-    public static function access(string $resource, int $staffId): ?string
+    /**
+     * Zakres widoczności: null (brak dostępu), ['all'], ['own', warunek SQL] albo ['limited'] (tylko imiona pracowników).
+     * Warunki odwzorowują get_*_where_sql_for_staff() i listy w kontrolerach Perfexa.
+     */
+    public static function scope(string $resource, int $sid): ?array
     {
         $def = self::map()[$resource] ?? null;
         if (!$def) {
             return null;
         }
-        if (is_admin($staffId)) {
-            return 'all';
+        if (is_admin($sid)) {
+            return ['all'];
         }
-        if ($resource === 'tickets') {
-            return get_option('staff_access_only_assigned_departments') == '1' ? 'own' : 'all';
-        }
-        if (in_array($resource, ['announcements', 'events'], true)) {
-            return 'own';
-        }
-        if ($resource === 'staff') {
-            return 'all';
-        }
-        if (staff_can('view', $def['feature'], $staffId)) {
-            return 'all';
-        }
-        if (($def['own'] ?? null) && (staff_can('view_own', $def['feature'], $staffId) || !empty($def['always_own']))) {
-            return 'own';
+        $p = db_prefix();
+        $can = fn ($cap, $feature = null) => staff_can($cap, $feature ?? $def['feature'], $sid);
+        switch ($resource) {
+            case 'customers':
+            case 'contacts':
+                if ($can('view', 'customers')) {
+                    return ['all'];
+                }
+                // Perfex: bez prawa widoku klient jest widoczny dla swoich opiekunów (customer_admins).
+                return ['own', "userid IN (SELECT customer_id FROM {$p}customer_admins WHERE staff_id=$sid)"];
+            case 'leads':
+                return $can('view') ? ['all'] : ['own', "(assigned=$sid OR addedfrom=$sid OR is_public=1)"];
+            case 'tickets':
+                return get_option('staff_access_only_assigned_departments') == '1'
+                    ? ['own', "(department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=$sid) OR assigned=$sid)"] : ['all'];
+            case 'tasks':
+                return $can('view') ? ['all'] : ['own', self::taskWhere($sid)];
+            case 'projects':
+                return $can('view') ? ['all'] : ['own', "id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid)"];
+            case 'invoices':
+            case 'estimates':
+            case 'proposals':
+                if ($can('view')) {
+                    return ['all'];
+                }
+                $where = self::salesWhere($resource, $sid);
+                return $where === null ? null : ['own', $where];
+            case 'payments':
+                if ($can('view')) {
+                    return ['all'];
+                }
+                $inv = self::scope('invoices', $sid);
+                if ($inv === null) {
+                    return null;
+                }
+                return $inv[0] === 'all' ? ['all'] : ['own', "invoiceid IN (SELECT id FROM {$p}invoices WHERE {$inv[1]})"];
+            case 'knowledge_base':
+                return $can('view') ? ['all'] : null;
+            case 'announcements':
+                return ['own', 'showtostaff=1'];
+            case 'events':
+                return ['own', "(userid=$sid OR public=1)"];
+            case 'staff':
+                return $can('view') ? ['all'] : ['limited'];
         }
         return null;
     }
 
-    private static function visibility(array $def, string $access, int $staffId): ?string
+    public static function taskWhere(int $sid): string
     {
-        return $access === 'own' ? str_replace(':sid', (string) $staffId, $def['own']) : null;
+        $p = db_prefix();
+        return "(is_public=1 OR addedfrom=$sid OR id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=$sid) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=$sid))";
+    }
+
+    /** Faktury, wyceny, propozycje: jak get_invoices_where_sql_for_staff() itd. w Perfexie. */
+    private static function salesWhere(string $resource, int $sid): ?string
+    {
+        $p = db_prefix();
+        $agent = $resource === 'proposals' ? 'assigned' : 'sale_agent';
+        $assignedAllowed = get_option('allow_staff_view_' . $resource . '_assigned') == 1;
+        if (staff_can('view_own', $resource, $sid)) {
+            return "(addedfrom=$sid" . ($assignedAllowed ? " OR $agent=$sid" : '') . ')';
+        }
+        return $assignedAllowed ? "$agent=$sid" : null;
+    }
+
+    public static function access(string $resource, int $sid): ?string
+    {
+        $s = self::scope($resource, $sid);
+        return $s[0] ?? null;
     }
 
     private static function fields(string $table): array
     {
         static $cache = [];
         return $cache[$table] ??= Store::db()->list_fields(db_prefix() . $table);
+    }
+
+    private static function cols(array $def, array $wanted): array
+    {
+        return array_values(array_filter(array_intersect($wanted, self::fields($def['table'])), fn ($c) => !preg_match(self::SECRET, $c)));
     }
 
     private static function clean(array $row, int $max): array
@@ -115,40 +176,39 @@ final class Resources
         return $row;
     }
 
-    private static function def(string $resource): array
+    private static function require(string $resource, int $sid): array
     {
         $def = self::map()[$resource] ?? null;
         if (!$def) {
             throw new Failure('unknown_resource', _l('mcai_err_resource'), 404);
         }
-        return $def;
-    }
-
-    private static function require(string $resource, int $staffId): array
-    {
-        $def = self::def($resource);
-        $access = self::access($resource, $staffId);
-        if ($access === null) {
+        $scope = self::scope($resource, $sid);
+        if ($scope === null) {
             throw new Failure('forbidden', _l('mcai_err_forbidden'), 403);
         }
-        return [$def, $access];
+        return [$def, $scope];
     }
 
-    public static function list(string $resource, int $staffId, array $a): array
+    private static function applyScope(\CI_DB_query_builder $db, array $scope): void
     {
-        [$def, $access] = self::require($resource, $staffId);
-        $db = Store::db();
-        $table = db_prefix() . $def['table'];
-        $have = self::fields($def['table']);
-        $cols = array_values(array_intersect($def['summary'], $have));
-        $db->select(implode(',', array_map(fn ($c) => "`$c`", $cols)))->from($table);
-        if ($w = self::visibility($def, $access, $staffId)) {
-            $db->where($w, null, false);
+        if ($scope[0] === 'own') {
+            $db->where($scope[1], null, false);
         }
+    }
+
+    public static function list(string $resource, int $sid, array $a): array
+    {
+        [$def, $scope] = self::require($resource, $sid);
+        $limited = $scope[0] === 'limited';
+        $db = Store::db();
+        $have = self::fields($def['table']);
+        $cols = self::cols($def, $limited ? $def['limited'] : $def['summary']);
+        $db->select(implode(',', array_map(fn ($c) => "`$c`", $cols)))->from(db_prefix() . $def['table']);
+        self::applyScope($db, $scope);
         $search = trim((string) ($a['search'] ?? ''));
         if ($search !== '') {
             $db->group_start();
-            foreach (array_intersect($def['search'], $have) as $c) {
+            foreach (array_intersect($limited ? ['firstname', 'lastname'] : $def['search'], $have) as $c) {
                 $db->or_like($c, $search);
             }
             $db->group_end();
@@ -157,9 +217,7 @@ final class Resources
             $db->where($def['status'], $a['status']);
         }
         if (isset($a['customer_id'])) {
-            if ($resource === 'tasks') {
-                $db->where('rel_type', 'customer')->where('rel_id', (int) $a['customer_id']);
-            } elseif ($resource === 'proposals') {
+            if (in_array($resource, ['tasks', 'proposals'], true)) {
                 $db->where('rel_type', 'customer')->where('rel_id', (int) $a['customer_id']);
             } elseif (isset($def['customer'])) {
                 $db->where($def['customer'], (int) $a['customer_id']);
@@ -168,11 +226,11 @@ final class Resources
             }
         }
         if (isset($a['assigned_to'])) {
-            $sid = (int) $a['assigned_to'];
+            $assignee = (int) $a['assigned_to'];
             if ($resource === 'tasks') {
-                $db->where('id IN (SELECT taskid FROM ' . db_prefix() . "task_assigned WHERE staffid=$sid)", null, false);
+                $db->where('id IN (SELECT taskid FROM ' . db_prefix() . "task_assigned WHERE staffid=$assignee)", null, false);
             } elseif (isset($def['assigned'])) {
-                $db->where($def['assigned'], $sid);
+                $db->where($def['assigned'], $assignee);
             } else {
                 throw new Failure('invalid_filter', _l('mcai_err_filter'));
             }
@@ -191,33 +249,32 @@ final class Resources
         $limit = max(1, min(100, (int) ($a['limit'] ?? 25)));
         $offset = max(0, (int) ($a['offset'] ?? 0));
         $rows = $db->order_by($def['pk'], ($a['order'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC')->limit($limit + 1, $offset)->get()->result_array();
-        $more = count($rows) > $limit;
-        return ['resource' => $resource, 'access' => $access, 'items' => array_map(fn ($r) => self::clean($r, self::LIST_TEXT), array_slice($rows, 0, $limit)), 'offset' => $offset, 'has_more' => $more];
+        return ['resource' => $resource, 'access' => $scope[0], 'items' => array_map(fn ($r) => self::clean($r, self::LIST_TEXT), array_slice($rows, 0, $limit)), 'offset' => $offset, 'has_more' => count($rows) > $limit];
     }
 
-    /** Pełny rekord bez sekretów, razem z powiązanymi danymi. */
-    public static function get(string $resource, int $id, int $staffId): array
+    public static function get(string $resource, int $id, int $sid): array
     {
-        [$def, $access] = self::require($resource, $staffId);
-        $row = self::row($resource, $id, $staffId, $def, $access);
+        [$def, $scope] = self::require($resource, $sid);
+        $row = self::fetch($def, $scope, $id);
         if ($row === null) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
         }
-        return ['resource' => $resource, 'id' => $id, 'item' => self::clean($row, self::GET_TEXT), 'related' => self::related($resource, $id, $row, $staffId)];
+        return ['resource' => $resource, 'id' => $id, 'item' => self::clean($row, self::GET_TEXT), 'related' => $scope[0] === 'limited' ? [] : self::related($resource, $id, $row, $sid)];
     }
 
-    /** Surowy rekord (do kopii przed zmianą). null, gdy brak lub niewidoczny. */
-    public static function row(string $resource, int $id, int $staffId, ?array $def = null, ?string $access = null): ?array
+    /** Rekord widoczny dla pracownika (kolumny z listy) albo null. */
+    public static function row(string $resource, int $id, int $sid): ?array
     {
-        if ($def === null) {
-            [$def, $access] = self::require($resource, $staffId);
-        }
+        [$def, $scope] = self::require($resource, $sid);
+        return self::fetch($def, $scope, $id);
+    }
+
+    private static function fetch(array $def, array $scope, int $id): ?array
+    {
         $db = Store::db();
-        $select = isset($def['columns']) ? implode(',', array_map(fn ($c) => "`$c`", array_intersect($def['columns'], self::fields($def['table'])))) : '*';
-        $db->select($select)->from(db_prefix() . $def['table'])->where($def['pk'], $id);
-        if ($w = self::visibility($def, $access, $staffId)) {
-            $db->where($w, null, false);
-        }
+        $cols = self::cols($def, $scope[0] === 'limited' ? $def['limited'] : $def['columns']);
+        $db->select(implode(',', array_map(fn ($c) => "`$c`", $cols)))->from(db_prefix() . $def['table'])->where($def['pk'], $id);
+        self::applyScope($db, $scope);
         return $db->get()->row_array() ?: null;
     }
 
@@ -226,53 +283,55 @@ final class Resources
         return array_map(fn ($r) => self::clean($r, self::GET_TEXT), Store::db()->query($sql, $bind)->result_array());
     }
 
-    private static function related(string $resource, int $id, array $row, int $staffId): array
+    private static function related(string $resource, int $id, array $row, int $sid): array
     {
         $p = db_prefix();
-        $staffName = "CONCAT(s.firstname,' ',s.lastname)";
+        $name = "CONCAT(s.firstname,' ',s.lastname)";
+        $notes = fn (string $type) => self::rows("SELECT n.id,n.description,n.dateadded,$name AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type=? AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$type, $id]);
+        $items = fn (string $type) => self::rows("SELECT id,description,long_description,qty,rate,unit,item_order FROM {$p}itemable WHERE rel_type=? AND rel_id=? ORDER BY item_order", [$type, $id]);
         switch ($resource) {
             case 'customers':
                 return [
                     'contacts' => self::rows("SELECT id,firstname,lastname,email,phonenumber,title,is_primary,active FROM {$p}contacts WHERE userid=? ORDER BY is_primary DESC,id", [$id]),
-                    'notes' => self::rows("SELECT n.id,n.description,n.dateadded,$staffName AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type='customer' AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$id]),
-                    'admins' => self::rows("SELECT s.staffid,$staffName AS name FROM {$p}customer_admins a JOIN {$p}staff s ON s.staffid=a.staff_id WHERE a.customer_id=?", [$id]),
+                    'notes' => $notes('customer'),
+                    'admins' => self::rows("SELECT s.staffid,$name AS name FROM {$p}customer_admins a JOIN {$p}staff s ON s.staffid=a.staff_id WHERE a.customer_id=?", [$id]),
                 ];
             case 'leads':
-                return ['notes' => self::rows("SELECT n.id,n.description,n.dateadded,$staffName AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type='lead' AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$id])];
+                return ['notes' => $notes('lead')];
             case 'tickets':
                 return [
-                    'replies' => self::rows("SELECT r.id,r.date,r.message,r.admin AS staff_id,r.contactid,r.name,r.email,$staffName AS staff_name FROM {$p}ticket_replies r LEFT JOIN {$p}staff s ON s.staffid=r.admin WHERE r.ticketid=? ORDER BY r.id", [$id]),
-                    'notes' => self::rows("SELECT n.id,n.description,n.dateadded,$staffName AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type='ticket' AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$id]),
+                    'replies' => self::rows("SELECT r.id,r.date,r.message,r.admin AS staff_id,r.contactid,r.name,r.email,$name AS staff_name FROM {$p}ticket_replies r LEFT JOIN {$p}staff s ON s.staffid=r.admin WHERE r.ticketid=? ORDER BY r.id", [$id]),
+                    'notes' => $notes('ticket'),
                 ];
             case 'tasks':
                 return [
-                    'assignees' => self::rows("SELECT s.staffid,$staffName AS name FROM {$p}task_assigned a JOIN {$p}staff s ON s.staffid=a.staffid WHERE a.taskid=?", [$id]),
-                    'followers' => self::rows("SELECT s.staffid,$staffName AS name FROM {$p}task_followers f JOIN {$p}staff s ON s.staffid=f.staffid WHERE f.taskid=?", [$id]),
-                    'comments' => self::rows("SELECT c.id,c.content,c.dateadded,c.staffid,c.contact_id,$staffName AS staff_name FROM {$p}task_comments c LEFT JOIN {$p}staff s ON s.staffid=c.staffid WHERE c.taskid=? ORDER BY c.id", [$id]),
+                    'assignees' => self::rows("SELECT s.staffid,$name AS name FROM {$p}task_assigned a JOIN {$p}staff s ON s.staffid=a.staffid WHERE a.taskid=?", [$id]),
+                    'followers' => self::rows("SELECT s.staffid,$name AS name FROM {$p}task_followers f JOIN {$p}staff s ON s.staffid=f.staffid WHERE f.taskid=?", [$id]),
+                    'comments' => self::rows("SELECT c.id,c.content,c.dateadded,c.staffid,c.contact_id,$name AS staff_name FROM {$p}task_comments c LEFT JOIN {$p}staff s ON s.staffid=c.staffid WHERE c.taskid=? ORDER BY c.id", [$id]),
                     'checklist' => self::rows("SELECT id,description,finished FROM {$p}task_checklist_items WHERE taskid=? ORDER BY list_order", [$id]),
                 ];
             case 'projects':
+                $tasks = self::scope('tasks', $sid);
+                $where = $tasks && $tasks[0] === 'own' ? ' AND ' . $tasks[1] : '';
                 return [
-                    'members' => self::rows("SELECT s.staffid,$staffName AS name FROM {$p}project_members m JOIN {$p}staff s ON s.staffid=m.staff_id WHERE m.project_id=?", [$id]),
-                    'tasks' => self::rows("SELECT id,name,status,duedate FROM {$p}tasks WHERE rel_type='project' AND rel_id=? ORDER BY id DESC LIMIT 100", [$id]),
+                    'members' => self::rows("SELECT s.staffid,$name AS name FROM {$p}project_members m JOIN {$p}staff s ON s.staffid=m.staff_id WHERE m.project_id=?", [$id]),
+                    'tasks' => $tasks ? self::rows("SELECT id,name,status,duedate FROM {$p}tasks WHERE rel_type='project' AND rel_id=?$where ORDER BY id DESC LIMIT 100", [$id]) : [],
                 ];
             case 'invoices':
-                return [
-                    'items' => self::rows("SELECT id,description,long_description,qty,rate,unit,item_order FROM {$p}itemable WHERE rel_type='invoice' AND rel_id=? ORDER BY item_order", [$id]),
-                    'payments' => self::access('payments', $staffId) ? self::rows("SELECT id,amount,paymentmode,date,transactionid FROM {$p}invoicepaymentrecords WHERE invoiceid=? ORDER BY id", [$id]) : [],
-                ];
+                $pay = self::scope('payments', $sid);
+                $where = $pay && $pay[0] === 'own' ? ' AND ' . $pay[1] : '';
+                return ['items' => $items('invoice'), 'payments' => $pay ? self::rows("SELECT id,amount,paymentmode,date,transactionid FROM {$p}invoicepaymentrecords WHERE invoiceid=?$where ORDER BY id", [$id]) : []];
             case 'estimates':
+                return ['items' => $items('estimate')];
             case 'proposals':
-                $type = $resource === 'estimates' ? 'estimate' : 'proposal';
-                return ['items' => self::rows("SELECT id,description,long_description,qty,rate,unit,item_order FROM {$p}itemable WHERE rel_type=? AND rel_id=? ORDER BY item_order", [$type, $id])];
+                return ['items' => $items('proposal')];
             case 'knowledge_base':
                 return ['group' => self::rows("SELECT groupid,name FROM {$p}knowledge_base_groups WHERE groupid=?", [(int) $row['articlegroup']])];
         }
         return [];
     }
 
-    /** Wyszukiwanie w wielu zasobach naraz, po 5 wyników na zasób. */
-    public static function search(string $query, int $staffId, ?array $only = null): array
+    public static function search(string $query, int $sid, ?array $only = null): array
     {
         $query = trim($query);
         if (mb_strlen($query) < 2) {
@@ -280,10 +339,10 @@ final class Resources
         }
         $out = [];
         foreach (array_keys(self::map()) as $r) {
-            if (($only && !in_array($r, $only, true)) || $r === 'staff' || self::access($r, $staffId) === null) {
+            if (($only && !in_array($r, $only, true)) || $r === 'staff' || self::scope($r, $sid) === null) {
                 continue;
             }
-            $found = self::list($r, $staffId, ['search' => $query, 'limit' => 5]);
+            $found = self::list($r, $sid, ['search' => $query, 'limit' => 5]);
             if ($found['items']) {
                 $out[$r] = $found['items'];
             }
@@ -291,22 +350,19 @@ final class Resources
         return ['query' => $query, 'results' => $out];
     }
 
-    /** Spis zasobów, poziom dostępu, liczby rekordów i słowniki statusów. */
-    public static function inventory(int $staffId): array
+    public static function inventory(int $sid): array
     {
         $p = db_prefix();
         $resources = [];
         foreach (self::map() as $name => $def) {
-            $access = self::access($name, $staffId);
+            $scope = self::scope($name, $sid);
             $count = null;
-            if ($access !== null) {
+            if ($scope !== null) {
                 $db = Store::db()->from($p . $def['table']);
-                if ($w = self::visibility($def, $access, $staffId)) {
-                    $db->where($w, null, false);
-                }
+                self::applyScope($db, $scope);
                 $count = $db->count_all_results();
             }
-            $resources[$name] = ['access' => $access ?? 'none', 'count' => $count];
+            $resources[$name] = ['access' => $scope[0] ?? 'none', 'count' => $count];
         }
         $db = Store::db();
         $dict = fn (string $sql) => $db->query($sql)->result_array();

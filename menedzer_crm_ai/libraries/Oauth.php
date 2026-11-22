@@ -16,7 +16,6 @@ final class OAuth
     public const ACCESS_TTL = 3600;
     public const MAX_BODY = 8192;
     public const MAX_CLIENTS = 1000;
-    private const REFRESH_GRACE = 30;
     private const CONSENT_FIELDS = ['client_id', 'redirect_uri', 'response_type', 'code_challenge', 'code_challenge_method', 'resource', 'scope', 'state'];
 
     public static function issuer(): string { return Store::base() . '/' . MCAI_MODULE; }
@@ -346,13 +345,17 @@ final class OAuth
     public static function exchangeCode(array $f): array
     {
         return self::locked($f['code'], 'code', function (array $cr, array $c) use ($f) {
+            // Najpierw powiązanie z klientem i PKCE: sam wyciekły kod nie może zerwać cudzego połączenia.
+            if (!hash_equals($cr['client_id'], $f['client_id']) || !hash_equals($cr['redirect_uri'], $f['redirect_uri'])
+                || !hash_equals($cr['resource'], $f['resource']) || !self::verifyPkce($f['code_verifier'], $cr['challenge']) || $cr['scope'] !== $c['scope']) {
+                throw self::error('invalid_grant');
+            }
             if ((int) $cr['consumed_at']) {
                 // RFC 6749 4.1.2: drugie użycie kodu unieważnia wydane na jego podstawie tokeny.
                 self::revokeConnection($c, 'oauth.code_replay');
                 throw self::error('invalid_grant');
             }
-            if ((int) $cr['expires_at'] <= time() || !hash_equals($cr['client_id'], $f['client_id']) || !hash_equals($cr['redirect_uri'], $f['redirect_uri'])
-                || !hash_equals($cr['resource'], $f['resource']) || !self::verifyPkce($f['code_verifier'], $cr['challenge']) || $cr['scope'] !== $c['scope']) {
+            if ((int) $cr['expires_at'] <= time()) {
                 throw self::error('invalid_grant');
             }
             self::consume($cr);
@@ -367,11 +370,7 @@ final class OAuth
                 throw self::error('invalid_grant');
             }
             if ((int) $cr['consumed_at']) {
-                // Ponowienie tuż po wymianie (zgubiona odpowiedź) dostaje nową parę. Później to kradzież: zrywamy połączenie.
-                if ((int) $cr['consumed_at'] > time() - self::REFRESH_GRACE) {
-                    Connections::audit($c, 'oauth.refresh_retry', 'issued');
-                    return self::tokens($cr);
-                }
+                // RFC 9700 4.14.2: zużyty token odświeżania użyty ponownie = możliwa kradzież, zrywamy całe połączenie.
                 self::revokeConnection($c, 'oauth.refresh_replay');
                 throw self::error('invalid_grant');
             }

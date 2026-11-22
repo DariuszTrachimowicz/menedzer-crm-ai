@@ -140,6 +140,9 @@ final class Server
             if (isset($p['enum']) && !in_array($v, $p['enum'], true)) {
                 return "Niedozwolona wartość pola: $k";
             }
+            if (is_string($v) && isset($p['pattern']) && !preg_match('/' . $p['pattern'] . '/D', $v)) {
+                return "Nieprawidłowy format pola: $k";
+            }
             if (is_string($v) && isset($p['maxLength']) && mb_strlen($v) > $p['maxLength']) {
                 return "Za długie pole: $k";
             }
