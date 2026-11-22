@@ -1,0 +1,116 @@
+<?php
+
+defined('BASEPATH') or exit('No direct script access allowed');
+
+$lang['mcai_name'] = 'Menedżer CRM AI';
+$lang['mcai_html_lang'] = 'pl';
+$lang['mcai_help_view'] = 'help_polish';
+$lang['mcai_your_level'] = 'Twój poziom';
+$lang['mcai_tab_start'] = 'Start';
+$lang['mcai_tab_connections'] = 'Połączenia';
+$lang['mcai_tab_operators'] = 'Uprawnienia';
+$lang['mcai_tab_activity'] = 'Historia';
+$lang['mcai_tab_help'] = 'Pomoc';
+
+$lang['mcai_level_read'] = 'Odczyt';
+$lang['mcai_level_work'] = 'Praca';
+$lang['mcai_level_full'] = 'Pełny';
+$lang['mcai_level_read_desc'] = 'Przegląd i wyszukiwanie danych, do których ta osoba ma dostęp w CRM. Bez zmian.';
+$lang['mcai_level_work_desc'] = 'Odczyt oraz zadania, komentarze, notatki, leady, szkice odpowiedzi w zgłoszeniach i artykuły bazy wiedzy. Każda zmiana z podglądem i cofnięciem.';
+$lang['mcai_level_full_desc'] = 'Praca oraz klienci, kontakty, projekty i dokumenty sprzedaży (jako szkice). Bez usuwania danych i bez wysyłek do klientów.';
+
+$lang['mcai_start_title'] = 'Połącz asystenta AI z CRM';
+$lang['mcai_start_intro'] = 'Asystent AI (Claude, Codex, ChatGPT, Gemini) czyta dane CRM i za zgodą przygotowuje zmiany. Ma najwyżej te uprawnienia, które masz Ty w Perfexie.';
+$lang['mcai_mcp_url'] = 'Adres serwera MCP';
+$lang['mcai_copy'] = 'Kopiuj';
+$lang['mcai_copied'] = 'Skopiowano';
+$lang['mcai_start_step1'] = 'W Claude otwórz Ustawienia, Konektory, Dodaj własny konektor i wklej adres.';
+$lang['mcai_start_step2'] = 'Zaloguj się do CRM i na ekranie zgody wybierz poziom dostępu oraz termin.';
+$lang['mcai_start_step3'] = 'Poproś asystenta o stan połączenia. Połączenie pojawi się w zakładce Połączenia.';
+$lang['mcai_start_other_apps'] = 'Codex, ChatGPT, Gemini CLI i Claude Code: instrukcje w zakładce Pomoc';
+
+$lang['mcai_diag_title'] = 'Sprawdzenie logowania';
+$lang['mcai_diag_intro'] = 'Sprawdza, czy aplikacje AI znajdą dokumenty logowania OAuth pod adresami, których szukają.';
+$lang['mcai_diag_run'] = 'Sprawdź';
+$lang['mcai_diag_ok'] = 'działa';
+$lang['mcai_diag_bad'] = 'nie działa';
+$lang['mcai_diag_optional'] = 'opcjonalny';
+$lang['mcai_diag_all_ok'] = 'Logowanie z aplikacji AI powinno działać.';
+$lang['mcai_diag_fix'] = 'Serwer www przechwytuje adresy /.well-known przed Perfexem. Dodaj regułę poniżej do konfiguracji nginx tej strony (przed blokiem location ~ /.well-known) i przeładuj nginx. Do tego czasu działa ręczne poświadczenie.';
+$lang['mcai_diag_cloudpanel'] = 'w bloku server nasłuchującym na 443';
+$lang['mcai_diag_fix_note'] = 'Na Apache z plikiem .htaccess Perfexa reguła nie jest potrzebna.';
+
+$lang['mcai_col_name'] = 'Nazwa';
+$lang['mcai_col_person'] = 'Osoba';
+$lang['mcai_col_scope'] = 'Poziom';
+$lang['mcai_col_created'] = 'Utworzone';
+$lang['mcai_col_expires'] = 'Ważne do';
+$lang['mcai_col_used'] = 'Ostatnio użyte';
+$lang['mcai_col_state'] = 'Stan';
+$lang['mcai_col_time'] = 'Czas';
+$lang['mcai_col_event'] = 'Zdarzenie';
+$lang['mcai_col_result'] = 'Wynik';
+$lang['mcai_col_operation'] = 'Operacja';
+$lang['mcai_manual'] = 'ręczne';
+$lang['mcai_unlimited'] = 'bezterminowo';
+$lang['mcai_state_active'] = 'aktywne';
+$lang['mcai_state_inactive'] = 'nieaktywne';
+$lang['mcai_revoke'] = 'Odetnij';
+$lang['mcai_revoke_all'] = 'Odetnij wszystkie połączenia';
+$lang['mcai_revoke_all_confirm'] = 'Odciąć wszystkie połączenia AI w tym CRM?';
+$lang['mcai_connection_revoked'] = 'Połączenie odcięte.';
+$lang['mcai_connection_revoked_all'] = 'Wszystkie połączenia odcięte.';
+$lang['mcai_token_once'] = 'Skopiuj poświadczenie teraz. Nie zostanie pokazane ponownie.';
+$lang['mcai_manual_title'] = 'Ręczne poświadczenie';
+$lang['mcai_manual_intro'] = 'Dla Codexa, Gemini CLI i programów, które nie logują się przez OAuth. Poświadczenie działa jak hasło: trzymaj je w zmiennej środowiskowej.';
+$lang['mcai_manual_create'] = 'Utwórz poświadczenie';
+$lang['mcai_app'] = 'Aplikacja';
+$lang['mcai_other'] = 'Inna';
+
+$lang['mcai_operators_intro'] = 'Tylko osoby z tej listy mogą połączyć asystenta AI z CRM. Administratorzy są na niej zawsze, z poziomem pełnym. Usunięcie osoby od razu odcina jej połączenia.';
+$lang['mcai_admin_auto'] = 'administrator';
+$lang['mcai_operator_add'] = 'Dodaj osobę';
+$lang['mcai_add'] = 'Dodaj';
+$lang['mcai_save'] = 'Zapisz';
+$lang['mcai_saved'] = 'Zapisano.';
+$lang['mcai_remove'] = 'Usuń z listy';
+$lang['mcai_remove_confirm'] = 'Usunąć tę osobę z listy? Jej połączenia AI zostaną odcięte.';
+$lang['mcai_operator_removed'] = 'Osoba usunięta z listy, jej połączenia odcięte.';
+$lang['mcai_activity_intro'] = 'Każde użycie narzędzia przez asystenta AI. Wpisy są przechowywane 30 dni.';
+
+$lang['mcai_consent_title'] = 'Zgoda na dostęp do CRM';
+$lang['mcai_consent_app'] = 'Aplikacja:';
+$lang['mcai_consent_declared'] = 'Nazwa aplikacji to deklaracja jej twórcy. Sprawdź adres powrotu przed zatwierdzeniem.';
+$lang['mcai_consent_return'] = 'Adres powrotu:';
+$lang['mcai_consent_crm'] = 'CRM:';
+$lang['mcai_consent_scope'] = 'Poziom dostępu';
+$lang['mcai_consent_expiry'] = 'Termin dostępu';
+$lang['mcai_consent_until'] = 'Do dnia';
+$lang['mcai_consent_end_date'] = 'Data końca';
+$lang['mcai_consent_unlimited'] = 'Bezterminowo';
+$lang['mcai_consent_unlimited_desc'] = 'Dostęp bezterminowy trwa do odcięcia połączenia albo usunięcia Cię z listy uprawnionych.';
+$lang['mcai_consent_rules'] = 'Asystent nie usuwa danych i nic nie wysyła klientom. Ma najwyżej Twoje uprawnienia w CRM.';
+$lang['mcai_consent_allow'] = 'Zatwierdź dostęp';
+$lang['mcai_consent_deny'] = 'Odmów';
+
+$lang['mcai_instructions'] = 'Zacznij od crm_status. Dostęp wynika z roli osoby w CRM i poziomu połączenia. Zmiany: najpierw crm_operation_preview, potem crm_operation_execute. Po niejasnym wyniku odczytaj crm_operation_status, nie ponawiaj zapisu.';
+$lang['mcai_rules_for_ai'] = 'Nie usuwasz danych. Nic nie wysyłasz klientom: odpowiedzi i dokumenty zapisujesz jako szkice, wysyła je pracownik. Każda zmiana ma podgląd, wykonanie i możliwość cofnięcia.';
+
+$lang['mcai_err_https'] = 'Połączenie wymaga HTTPS.';
+$lang['mcai_err_auth'] = 'Brak ważnego poświadczenia albo dostęp został odcięty.';
+$lang['mcai_err_authorize'] = 'Nieprawidłowe żądanie logowania. Wróć do aplikacji i dodaj połączenie ponownie.';
+$lang['mcai_err_not_operator'] = 'Nie jesteś na liście osób uprawnionych do łączenia AI z tym CRM. Poproś administratora o dodanie.';
+$lang['mcai_err_level'] = 'Nie masz uprawnień do tego poziomu dostępu.';
+$lang['mcai_err_consent'] = 'Formularz został już użyty albo wygasł. Wróć do aplikacji i połącz ponownie.';
+$lang['mcai_err_scope'] = 'Wybierz poziom dostępu.';
+$lang['mcai_err_date'] = 'Podaj prawidłową datę końca dostępu.';
+$lang['mcai_err_date_range'] = 'Wybierz przyszłą datę, najwyżej za rok.';
+$lang['mcai_err_rate'] = 'Zbyt wiele prób. Spróbuj za minutę.';
+$lang['mcai_err_operator'] = 'Nie można zapisać tej osoby.';
+$lang['mcai_err_resource'] = 'Nieznany zasób.';
+$lang['mcai_err_forbidden'] = 'Rola tej osoby w CRM nie daje dostępu do tych danych.';
+$lang['mcai_err_not_found'] = 'Nie znaleziono albo brak dostępu.';
+$lang['mcai_err_filter'] = 'Ten filtr nie działa dla tego zasobu.';
+$lang['mcai_err_query'] = 'Wpisz co najmniej 2 znaki.';
+$lang['mcai_err_tool'] = 'Narzędzie nie jest dostępne dla tego połączenia.';
+$lang['mcai_err_server'] = 'Błąd serwera. Szczegóły są w dzienniku CRM.';
