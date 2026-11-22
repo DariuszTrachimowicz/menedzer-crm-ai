@@ -177,6 +177,13 @@ async function authorize(page, clientId, scope) {
   const t1b = await tool(T, 'crm_resource_get', { resource: 'tasks', id: 1 });
   check(!rb2.isError && t1b.data.item.status === '1' && !t1b.data.item.datefinished, 'cofnięcie przywraca status i datę', JSON.stringify(rb2.data));
 
+  const pr = await run('project.update', { status: 4 }, 1);
+  const prg = await tool(T, 'crm_resource_get', { resource: 'projects', id: 1 });
+  check(!pr.ex.isError && prg.data.item.status === '4' && !!prg.data.item.date_finished, 'zamknięcie projektu ustawia datę zakończenia', JSON.stringify(pr.ex.data));
+  const prb = await tool(T, 'crm_operation_rollback', { operation_id: pr.pv.data.operation_id, confirm: true });
+  const prg2 = await tool(T, 'crm_resource_get', { resource: 'projects', id: 1 });
+  check(!prb.isError && prg2.data.item.status === '2' && !prg2.data.item.date_finished, 'cofnięcie przywraca status i czyści datę', JSON.stringify(prb.data));
+
   const pA = await tool(T, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Wersja A' } });
   const pB = await run('task.update', { name: 'Wersja B' }, 1);
   const exA = await tool(T, 'crm_operation_execute', { operation_id: pA.data.operation_id, confirm: true, idempotency_key: 'A' });

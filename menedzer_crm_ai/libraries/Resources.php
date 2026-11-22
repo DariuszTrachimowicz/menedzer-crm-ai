@@ -36,7 +36,7 @@ final class Resources
                 'columns' => ['ticketid', 'userid', 'contactid', 'merged_ticket_id', 'email', 'name', 'department', 'priority', 'status', 'service', 'subject', 'message', 'admin', 'date', 'project_id', 'lastreply', 'clientread', 'adminread', 'assigned', 'cc']],
             'tasks' => ['table' => 'tasks', 'pk' => 'id', 'feature' => 'tasks', 'date' => 'dateadded', 'status' => 'status',
                 'summary' => ['id', 'name', 'status', 'priority', 'startdate', 'duedate', 'datefinished', 'rel_type', 'rel_id', 'addedfrom', 'visible_to_client'], 'search' => ['name', 'description'],
-                'columns' => ['id', 'name', 'description', 'priority', 'dateadded', 'startdate', 'duedate', 'datefinished', 'addedfrom', 'status', 'recurring', 'rel_id', 'rel_type', 'is_public', 'billable', 'billed', 'invoice_id', 'hourly_rate', 'milestone', 'visible_to_client']],
+                'columns' => ['id', 'name', 'description', 'priority', 'dateadded', 'startdate', 'duedate', 'datefinished', 'addedfrom', 'status', 'recurring', 'rel_id', 'rel_type', 'is_public', 'billable', 'billed', 'invoice_id', 'hourly_rate', 'milestone', 'visible_to_client', 'is_added_from_contact']],
             'projects' => ['table' => 'projects', 'pk' => 'id', 'feature' => 'projects', 'date' => 'project_created', 'status' => 'status', 'customer' => 'clientid',
                 'summary' => ['id', 'name', 'clientid', 'status', 'start_date', 'deadline', 'progress'], 'search' => ['name', 'description'],
                 'columns' => ['id', 'name', 'description', 'status', 'clientid', 'billing_type', 'start_date', 'deadline', 'project_created', 'date_finished', 'progress', 'progress_from_tasks', 'project_cost', 'project_rate_per_hour', 'estimated_hours', 'addedfrom']],
@@ -289,7 +289,9 @@ final class Resources
     /** Pola rozliczeniowe tylko dla tych, którym pokazuje je panel Perfexa. */
     private static function money(string $resource, array $row, int $sid): array
     {
-        if ($resource === 'tasks' && !staff_can('edit', 'tasks', $sid) && (int) ($row['addedfrom'] ?? 0) !== $sid) {
+        // Autor jak Tasks_model::is_task_creator: addedfrom i is_added_from_contact=0 (kontakt może mieć ten sam numer).
+        $creator = (int) ($row['addedfrom'] ?? 0) === $sid && (int) ($row['is_added_from_contact'] ?? 1) === 0;
+        if ($resource === 'tasks' && !staff_can('edit', 'tasks', $sid) && !$creator) {
             unset($row['hourly_rate']); // view_task_template: autor zadania albo prawo edycji
         }
         if ($resource === 'projects' && !staff_can('edit', 'projects', $sid)) {

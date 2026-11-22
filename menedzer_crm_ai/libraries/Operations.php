@@ -298,7 +298,9 @@ final class Operations
                 }
                 return;
             case 'contact.create':
-                if (!staff_can('edit', 'customers', $sid) || !$visible('customers', $change['userid'])) {
+                // Jak Clients::form_contact(): prawo tworzenia klientów albo opiekun tej firmy.
+                $admin = Store::db()->query('SELECT staff_id FROM ' . db_prefix() . 'customer_admins WHERE customer_id=? AND staff_id=? LOCK IN SHARE MODE', [$change['userid'], $sid])->num_rows() > 0;
+                if ((!staff_can('create', 'customers', $sid) && !$admin) || !$visible('customers', $change['userid'])) {
                     throw $deny();
                 }
                 return;
@@ -355,6 +357,9 @@ final class Operations
         $cols = array_keys($change);
         if ($action === 'task.update' && in_array('status', $cols, true)) {
             $cols[] = 'datefinished'; // zmienia się razem ze statusem i wraca przy cofnięciu
+        }
+        if ($action === 'project.update' && in_array('status', $cols, true)) {
+            $cols[] = 'date_finished'; // jak Projects_model::mark_as: ustawiana przy statusie 4, czyszczona przy wyjściu z 4
         }
         return $cols;
     }
@@ -578,6 +583,13 @@ final class Operations
         if ($plan['action'] === 'task.update' && isset($data['status'])) {
             $data['datefinished'] = (int) $data['status'] === 5 ? date('Y-m-d H:i:s') : null;
         }
+        if ($plan['action'] === 'project.update' && isset($data['status'])) {
+            if ((int) $data['status'] === 4) {
+                $data['date_finished'] = (int) $now['status'] === 4 ? $now['date_finished'] : date('Y-m-d H:i:s');
+            } elseif ((int) $now['status'] === 4) {
+                $data['date_finished'] = null;
+            }
+        }
         Store::db()->where($def['pk'], $target)->update(db_prefix() . $def['table'], $data);
         $after = self::snapshot($def, $target, $cols, true);
         if (self::hash(array_intersect_key($after, $plan['change'])) !== self::hash($plan['change'])) {
@@ -674,7 +686,7 @@ final class Operations
                 if ($keys !== $expected || self::hash($before) !== $op['before_hash']) {
                     throw self::fail('rollback_unavailable', _l('mcai_op_snapshot_mismatch'));
                 }
-                $restore = array_diff_key($before, ['datefinished' => 1]);
+                $restore = array_diff_key($before, ['datefinished' => 1, 'date_finished' => 1]);
                 // Odtwarzane wartości muszą dziś przejść walidację (np. status zgłoszenia mógł zostać usunięty).
                 foreach ($restore as $k => $v) {
                     $type = $def['f'][$k];
