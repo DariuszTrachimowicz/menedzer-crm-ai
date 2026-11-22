@@ -108,8 +108,13 @@ async function authorize(page, clientId, scope) {
   const j = await authorize(jan.page, client.client_id);
   check(j.error && /liście/.test(j.error), 'osoba spoza listy nie może zatwierdzić', (j.error || '').slice(0, 80));
 
-  // 5. Pracownik z listy z poziomem Odczyt
+  // 5. Pracownik z listy z poziomem Odczyt (najpierw sprzątanie po poprzednim uruchomieniu)
   await admin.page.goto(BASE + '/admin/menedzer_crm_ai?tab=operators');
+  admin.page.on('dialog', (d) => d.accept());
+  const leftover = admin.page.locator('form[action$="operator_remove"]:has(input[name=staff_id][value="2"]) button');
+  if (await leftover.count()) {
+    await Promise.all([admin.page.waitForNavigation(), leftover.click()]);
+  }
   await admin.page.selectOption('form[action$="operator_save"] select[name=staff_id]', '2');
   await admin.page.selectOption('form[action$="operator_save"]:has(select[name=staff_id]) select[name=level]', 'read');
   await Promise.all([admin.page.waitForNavigation(), admin.page.click('form[action$="operator_save"]:has(select[name=staff_id]) button')]);
@@ -126,7 +131,6 @@ async function authorize(page, clientId, scope) {
 
   // 6. Usunięcie z listy odcina dostęp od razu
   await admin.page.goto(BASE + '/admin/menedzer_crm_ai?tab=operators');
-  admin.page.on('dialog', (d) => d.accept());
   await Promise.all([admin.page.waitForNavigation(), admin.page.click('form[action$="operator_remove"] button')]);
   const gone = await rpc(ea, 'ping', {});
   check(gone.status === 401, 'po usunięciu z listy token Ewy nie działa', gone.status);
