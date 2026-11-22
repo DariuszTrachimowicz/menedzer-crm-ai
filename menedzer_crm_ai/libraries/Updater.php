@@ -123,8 +123,15 @@ final class Updater
                 throw $fail();
             }
             // Nowe tabele (CREATE IF NOT EXISTS) z kodu nowej wersji; install.php rzuca wyjątek przy błędzie SQL.
-            require $dir . '/install.php';
+            // db_debug wyłączony, żeby błąd SQL wrócił jako false, a nie zakończył procesu przed przywróceniem.
             $db = Store::db();
+            $debug = $db->db_debug;
+            $db->db_debug = false;
+            try {
+                require $dir . '/install.php';
+            } finally {
+                $db->db_debug = $debug;
+            }
             $db->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
             $saved = $db->select('installed_version')->where('module_name', MCAI_MODULE)->get(db_prefix() . 'modules')->row_array();
             if (($saved['installed_version'] ?? '') !== $version) {
@@ -135,7 +142,8 @@ final class Updater
             self::remove($old);
         } catch (\Throwable $e) {
             if ($swapped) {
-                // Przywrócenie poprzedniej wersji w miejsce nieudanej.
+                // Przywrócenie poprzedniej wersji w miejsce nieudanej: numer w bazie i pliki.
+                Store::db()->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => MCAI_VERSION]);
                 $failed = $new . '-failed';
                 if (is_dir($dir) && !rename($dir, $failed)) {
                     log_message('error', 'Menedzer CRM AI: nie można odsunąć nieudanej wersji; poprzednia jest w ' . $old);

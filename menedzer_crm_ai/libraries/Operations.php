@@ -130,7 +130,10 @@ final class Operations
             $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true]);
             $purifier = new \HTMLPurifier($config);
         }
-        return $purifier ? $purifier->purify($html) : nl2br(htmlspecialchars(strip_tags($html), ENT_QUOTES, 'UTF-8'));
+        if (!$purifier) {
+            throw new Failure('invalid_change', 'Ten CRM nie ma oczyszczacza HTML; pole przyjmuje tylko zapis przez panel.');
+        }
+        return $purifier->purify($html);
     }
 
     private static function value(string $field, string $type, $v)
@@ -224,7 +227,7 @@ final class Operations
     private static function authorize(string $action, int $sid, array $change, ?array $current): void
     {
         $deny = fn (string $why = '') => new Failure('forbidden', $why !== '' ? $why : _l('mcai_err_forbidden'), 403);
-        $visible = fn (string $resource, int $id) => Resources::row($resource, $id, $sid) !== null;
+        $visible = fn (string $resource, int $id) => self::visible($resource, $id, $sid);
         switch ($action) {
             case 'task.create':
                 if (!staff_can('create', 'tasks', $sid)) {
@@ -307,11 +310,24 @@ final class Operations
         return hash('sha256', Store::json($norm));
     }
 
-    private static function snapshot(array $def, int $id, ?array $fields, bool $lock): ?array
+    /** $where: warunek widoczności osoby w tym samym zapytaniu (podgląd nie ujawni pól rekordu, który właśnie zniknął z zasięgu). */
+    private static function snapshot(array $def, int $id, ?array $fields, bool $lock, ?string $where = null): ?array
     {
         $cols = $fields === null ? '*' : implode(',', array_map(fn ($c) => "`$c`", $fields));
-        $row = Store::db()->query('SELECT ' . $cols . ' FROM `' . db_prefix() . $def['table'] . '` WHERE `' . $def['pk'] . '`=?' . ($lock ? ' FOR UPDATE' : ''), [$id])->row_array();
+        $row = Store::db()->query('SELECT ' . $cols . ' FROM `' . db_prefix() . $def['table'] . '` WHERE `' . $def['pk'] . '`=?' . ($where ? " AND $where" : '') . ($lock ? ' FOR UPDATE' : ''), [$id])->row_array();
         return $row ?: null;
+    }
+
+    /** Widoczność rekordu powiązanego, z blokadą współdzieloną do końca transakcji. */
+    private static function visible(string $resource, int $id, int $sid): bool
+    {
+        $scope = Resources::scope($resource, $sid);
+        if ($scope === null || $scope[0] === 'limited') {
+            return false;
+        }
+        $def = Resources::map()[$resource];
+        $where = isset($scope[1]) ? ' AND ' . $scope[1] : '';
+        return Store::db()->query("SELECT `{$def['pk']}` FROM `" . db_prefix() . $def['table'] . "` WHERE `{$def['pk']}`=?$where LOCK IN SHARE MODE", [$id])->num_rows() === 1;
     }
 
     private static function columns(string $action, array $change): array
@@ -373,7 +389,11 @@ final class Operations
         $current = self::target($def, $target, $sid, false);
         self::authorize($action, $sid, $change, $current);
         self::checkContact($action, $change, $target);
-        $before = $create ? [] : self::snapshot($def, $target, self::columns($action, $change), false);
+        $scope = $create ? null : Resources::scope($def['resource'], $sid);
+        $before = $create ? [] : self::snapshot($def, $target, self::columns($action, $change), false, $scope[1] ?? null);
+        if ($before === null) {
+            throw new Failure('not_found', _l('mcai_err_not_found'), 404);
+        }
         $plan = ['v' => self::PLAN_VERSION, 'action' => $action, 'target_id' => $target, 'change' => $change];
         $id = self::uuid();
         Store::db()->insert(Store::table('operations'), [
@@ -419,8 +439,9 @@ final class Operations
     private static function public(array $op): array
     {
         $def = self::actions()[$op['action']] ?? null;
+        $current = (json_decode((string) $op['plan'], true)['v'] ?? 0) === self::PLAN_VERSION;
         return ['operation_id' => $op['id'], 'status' => $op['status'], 'action' => $op['action'], 'target_id' => (int) $op['target_id'] ?: null,
-            'new_id' => (int) $op['new_id'] ?: null, 'rollback_available' => $op['status'] === 'verified' && $def && self::rollbackable($def),
+            'new_id' => (int) $op['new_id'] ?: null, 'rollback_available' => $op['status'] === 'verified' && $current && $def && self::rollbackable($def),
             'updated_at' => (int) $op['updated_at'] ? date('c', (int) $op['updated_at']) : null];
     }
 
@@ -449,7 +470,14 @@ final class Operations
             }
             try {
                 $op = self::load($c, $id, true);
-                $fresh = Connections::fresh($c['id']);
+                // Wiersze decydujące o dostępie blokujemy do commitu: odcięcie połączenia, zmiana poziomu
+                // czy roli w trakcie czeka na koniec tej operacji, a nie przechodzi obok niej.
+                $p = db_prefix();
+                $fresh = $db->query('SELECT * FROM `' . Store::table('connections') . '` WHERE id=? FOR UPDATE', [$c['id']])->row_array();
+                $sid = (int) ($fresh['staff_id'] ?? 0);
+                $db->query("SELECT staffid FROM {$p}staff WHERE staffid=? LOCK IN SHARE MODE", [$sid]);
+                $db->query('SELECT staff_id FROM `' . Store::table('operators') . '` WHERE staff_id=? LOCK IN SHARE MODE', [$sid]);
+                $db->query("SELECT staff_id FROM {$p}staff_permissions WHERE staff_id=? LOCK IN SHARE MODE", [$sid]);
                 $level = $fresh ? Connections::effective($fresh) : null;
                 if ($level === null) {
                     throw new Failure('unauthorized', _l('mcai_err_auth'), 401);
@@ -501,8 +529,11 @@ final class Operations
                 throw self::fail('expired', 'Podgląd wygasł. Przygotuj nowy.', 'expired');
             }
             $create = $def['mode'] === 'create';
-            // Plan przechodzi walidację od nowa według bieżących reguł.
-            $plan['change'] = self::normalize($def, $plan['change'], $create);
+            // Plan musi być dokładnie tym z podglądu i przejść bieżącą walidację bez żadnej zmiany treści.
+            if (!hash_equals($op['plan_hash'], hash('sha256', Store::json($plan))) || $plan['action'] !== $op['action'] || (int) ($plan['target_id'] ?? 0) !== (int) $op['target_id']
+                || Store::json(self::normalize($def, $plan['change'], $create)) !== Store::json($plan['change'])) {
+                throw self::fail('expired', 'Plan operacji nie przechodzi bieżącej walidacji. Przygotuj nowy podgląd.', 'expired');
+            }
             $current = self::target($def, $plan['target_id'] ?? null, $sid, true);
             self::authorize($plan['action'], $sid, $plan['change'], $current);
             self::checkContact($plan['action'], $plan['change'], $plan['target_id'] ?? null);
@@ -575,6 +606,12 @@ final class Operations
                 // Pod blokadą „contacts” (transact): e-mail sprawdzony w tej transakcji, jeden kontakt główny.
                 $primary = $db->query("SELECT id FROM {$p}contacts WHERE userid=? AND is_primary=1 FOR UPDATE", [$ch['userid']])->num_rows() === 0 ? 1 : 0;
                 $row = $ch + ['phonenumber' => '', 'is_primary' => $primary, 'datecreated' => $now, 'active' => 1, 'email_verified_at' => $now];
+                // Nowy kontakt nie staje się odbiorcą faktur, ofert ani powiadomień: włącza to pracownik.
+                foreach (['invoice_emails', 'estimate_emails', 'credit_note_emails', 'contract_emails', 'task_emails', 'project_emails', 'ticket_emails'] as $flag) {
+                    if (in_array($flag, $db->list_fields($p . 'contacts'), true)) {
+                        $row[$flag] = 0;
+                    }
+                }
                 break;
             default:
                 throw new \RuntimeException('action');
@@ -587,11 +624,12 @@ final class Operations
         foreach ($ch['assignees'] ?? [] as $staff) {
             $db->insert($p . 'task_assigned', ['staffid' => $staff, 'taskid' => $newId, 'assigned_from' => $sid, 'is_assigned_from_contact' => 0]);
         }
-        $after = self::snapshot($def, $newId, null, true);
+        // Skrót całego wiersza tylko dla wpisów, które da się cofnąć (komentarz, notatka); inaczej samo potwierdzenie ID.
+        $after = self::snapshot($def, $newId, empty($def['leaf']) ? [$def['pk']] : null, true);
         if ($after === null) {
             throw new \RuntimeException('verify');
         }
-        return ['new_id' => $newId, 'after_hash' => self::hash($after)];
+        return ['new_id' => $newId, 'after_hash' => empty($def['leaf']) ? '' : self::hash($after)];
     }
 
     private static function rollback(array $c, string $id): array
@@ -606,10 +644,27 @@ final class Operations
             $current = self::target($def, $plan['target_id'] ?? null, $sid, true);
             if ($def['mode'] === 'update') {
                 $before = json_decode($op['before_state'], true);
-                if (!is_array($before) || array_diff(array_keys($before), self::columns($plan['action'], array_fill_keys(array_keys($def['f']), 1)))) {
-                    throw self::fail('rollback_unavailable', 'Kopia stanu nie pasuje do tej akcji.');
+                $expected = self::columns($plan['action'], $plan['change']);
+                sort($expected);
+                $keys = is_array($before) ? array_keys($before) : [];
+                sort($keys);
+                if ($keys !== $expected || self::hash($before) !== $op['before_hash']) {
+                    throw self::fail('rollback_unavailable', 'Kopia stanu nie pasuje do tej operacji.');
                 }
                 $restore = array_diff_key($before, ['datefinished' => 1]);
+                // Odtwarzane wartości muszą dziś przejść walidację (np. status zgłoszenia mógł zostać usunięty).
+                foreach ($restore as $k => $v) {
+                    if ($v === null) {
+                        continue;
+                    }
+                    $type = $def['f'][$k];
+                    $typed = preg_match('/^(int|ref|staff)/', $type) && is_numeric($v) ? (int) $v : $v;
+                    try {
+                        self::value($k, $type, $typed);
+                    } catch (Failure $e) {
+                        throw self::fail('conflict', "Poprzednia wartość pola $k jest dziś nieprawidłowa. Nie cofam.");
+                    }
+                }
                 self::authorize($plan['action'], $sid, $restore, $current);
                 self::checkContact($plan['action'], $restore, (int) $plan['target_id']);
                 $now = self::snapshot($def, (int) $plan['target_id'], array_keys($before), true);
@@ -625,8 +680,17 @@ final class Operations
                 self::authorize($plan['action'], $sid, $plan['change'], $current);
                 $newId = (int) $op['new_id'];
                 $now = self::snapshot($def, $newId, null, true);
-                if ($now === null || self::hash($now) !== $op['after_hash']) {
+                if ($now === null || $op['after_hash'] === '' || self::hash($now) !== $op['after_hash']) {
                     throw self::fail('conflict', 'Wpis zmienił się po tej operacji. Nie cofam.');
+                }
+                if ($plan['action'] === 'task.comment') {
+                    // Reguła Perfexa (Tasks_model::remove_comment): po godzinie usuwa tylko administrator.
+                    if (get_option('client_staff_add_edit_delete_task_comments_first_hour') == 1 && strtotime($now['dateadded']) < strtotime('-1 hours') && !is_admin($sid)) {
+                        throw self::fail('rollback_unavailable', 'Komentarz ma ponad godzinę; usuwa go administrator.');
+                    }
+                    if ((int) $now['file_id'] !== 0 || $db->query("SELECT id FROM {$p}files WHERE task_comment_id=? LOCK IN SHARE MODE", [$newId])->num_rows() > 0) {
+                        throw self::fail('conflict', 'Do komentarza dołączono plik. Nie cofam.');
+                    }
                 }
                 $db->where($def['pk'], $newId)->delete($p . $def['table']);
             }

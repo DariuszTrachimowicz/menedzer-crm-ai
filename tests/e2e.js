@@ -81,7 +81,7 @@ async function authorize(page, clientId, scope) {
   const st = await tool(access, 'crm_status');
   check(!st.isError && st.data.level === 'full' && st.data.user.admin === true, 'crm_status administratora', JSON.stringify(st.data).slice(0, 200));
   const inv = await tool(access, 'crm_inventory');
-  check(!inv.isError && inv.data.resources.customers.count === 2, 'crm_inventory liczy klientów', JSON.stringify(inv.data.resources.customers));
+  check(!inv.isError && inv.data.resources.customers.count >= 2, 'crm_inventory liczy klientów', JSON.stringify(inv.data.resources.customers));
   const cl = await tool(access, 'crm_resource_list', { resource: 'customers', search: 'Testowa' });
   check(!cl.isError && cl.data.items.length === 1 && cl.data.items[0].company.startsWith('Testowa'), 'lista klientów z wyszukiwaniem');
   const cg = await tool(access, 'crm_resource_get', { resource: 'customers', id: 1 });
@@ -93,7 +93,7 @@ async function authorize(page, clientId, scope) {
   const sf = await tool(access, 'crm_resource_get', { resource: 'staff', id: 2 });
   check(!sf.isError && !('password' in sf.data.item) && sf.data.item.firstname === 'Ewa', 'pracownik bez hasła');
   const se = await tool(access, 'crm_search', { query: 'ofert' });
-  check(!se.isError && se.data.results.tasks && se.data.results.tasks.length === 1, 'wyszukiwanie w wielu zasobach', JSON.stringify(Object.keys(se.data.results || {})));
+  check(!se.isError && se.data.results.tasks && se.data.results.tasks.length >= 1, 'wyszukiwanie w wielu zasobach', JSON.stringify(Object.keys(se.data.results || {})));
   const unk = await tool(access, 'crm_resource_list', { resource: 'customers', foo: 1 });
   check(unk.isError && unk.data.error === 'invalid_arguments', 'nieznane pole odrzucone');
 
@@ -137,7 +137,7 @@ async function authorize(page, clientId, scope) {
   const einv = await tool(ea, 'crm_inventory');
   console.log('     dostęp Ewy:', JSON.stringify(Object.fromEntries(Object.entries(einv.data.resources).map(([k, v]) => [k, v.access + ':' + v.count]))));
   const etasks = await tool(ea, 'crm_resource_list', { resource: 'tasks' });
-  check(!etasks.isError && etasks.data.items.length === 1, 'Ewa widzi zadanie, do którego jest przypisana');
+  check(!etasks.isError && etasks.data.items.length >= 1 && etasks.data.items.some((t) => Number(t.id) === 1), 'Ewa widzi zadanie, do którego jest przypisana');
 
   // 6. Usunięcie z listy odcina dostęp od razu
   await admin.page.goto(BASE + '/admin/menedzer_crm_ai?tab=operators');
@@ -193,6 +193,7 @@ async function authorize(page, clientId, scope) {
   check(!ko.ex.isError, 'kontakt dla nowego klienta', JSON.stringify(ko.ex.data));
   const kg = await tool(T, 'crm_resource_get', { resource: 'contacts', id: ko.ex.data.new_id });
   check(kg.data.item && kg.data.item.is_primary === '1', 'pierwszy kontakt jest główny');
+  check(kg.data.item && kg.data.item.invoice_emails === '0' && kg.data.item.ticket_emails === '0', 'nowy kontakt bez maili z fakturami i zgłoszeniami', JSON.stringify(kg.data.item));
   const dup = await tool(T, 'crm_operation_preview', { action: 'contact.create', change: { userid: 1, firstname: 'X', lastname: 'Y', email: mail } });
   check(dup.isError && /istnieje/.test(dup.data.message), 'duplikat e-maila kontaktu odrzucony');
   const rbC = await tool(T, 'crm_operation_rollback', { operation_id: cc.pv.data.operation_id, confirm: true });

@@ -10,7 +10,8 @@ Autor: Dariusz Trachimowicz, https://d-x.pl/. Licencja: GPL v2 lub nowsza (kod m
 - **Lista uprawnionych.** Połączyć AI mogą tylko osoby, które administrator dodał na listę. Administratorzy są na niej zawsze. Usunięcie osoby od razu odcina jej połączenia.
 - **Uprawnienia z Perfexa.** Asystent nigdy nie zrobi więcej niż rola osoby w CRM. Poziom w module (Odczyt, Praca, Pełny) dodatkowo to ogranicza.
 - **Dane:** klienci i kontakty, leady, zgłoszenia, zadania, projekty, faktury, oferty, propozycje, płatności, baza wiedzy, ogłoszenia, kalendarz.
-- **Zmiany z podglądem i cofnięciem:** zadania, komentarze, notatki, leady, statusy zgłoszeń, szkice odpowiedzi, artykuły bazy wiedzy, klienci, kontakty, projekty.
+- **Zmiany z podglądem:** zadania, komentarze, notatki, leady, statusy zgłoszeń, szkice odpowiedzi, szkice artykułów bazy wiedzy, klienci, kontakty, projekty. Cofnąć można każdą zmianę pól oraz własny komentarz, notatkę i szkic. Utworzonego klienta, kontaktu, zadania, leada czy artykułu AI nie cofa: usuwa je pracownik w panelu.
+- **Nowy kontakt nie dostaje maili:** flagi wysyłki faktur, ofert i powiadomień są wyłączone, włącza je pracownik.
 - **Bez usuwania i bez wysyłek.** Moduł nie ma narzędzi do usuwania danych. Odpowiedź do klienta powstaje jako notatka wewnętrzna zgłoszenia, wysyła ją pracownik. Zapisy omijają modele Perfexa, więc nie uruchamiają maili ani powiadomień.
 - **Historia** każdego użycia narzędzia, przechowywana 30 dni.
 - **Aktualizacje** z wydań na GitHubie, przyciskiem na zakładce Start.

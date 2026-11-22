@@ -16,7 +16,7 @@ $lang['mcai_level_read'] = 'Read';
 $lang['mcai_level_work'] = 'Work';
 $lang['mcai_level_full'] = 'Full';
 $lang['mcai_level_read_desc'] = 'Browse and search the data this person can access in the CRM. No changes.';
-$lang['mcai_level_work_desc'] = 'Read plus tasks, comments, notes, leads, ticket reply drafts and knowledge base articles. Every change with preview and rollback.';
+$lang['mcai_level_work_desc'] = 'Read plus tasks, comments, notes, leads, ticket reply drafts and knowledge base article drafts. Every change has a preview; field changes and own entries can be rolled back.';
 $lang['mcai_level_full_desc'] = 'Work plus customers, contacts, projects and sales documents (as drafts). No deleting and no sending to customers.';
 
 $lang['mcai_start_title'] = 'Connect an AI assistant to the CRM';
@@ -94,7 +94,7 @@ $lang['mcai_consent_allow'] = 'Approve access';
 $lang['mcai_consent_deny'] = 'Deny';
 
 $lang['mcai_instructions'] = 'Start with crm_status. Access follows the person\'s CRM role and the connection level. Changes: crm_operation_preview first, then crm_operation_execute. After an unclear result read crm_operation_status, do not retry the write.';
-$lang['mcai_rules_for_ai'] = 'You do not delete data. You never send anything to customers: replies and documents are saved as drafts and a staff member sends them. Every change has a preview, execution and rollback.';
+$lang['mcai_rules_for_ai'] = 'You do not delete data. You never send anything to customers: replies and articles are saved as drafts, a staff member sends and publishes them. Every change has a preview. Field changes and your own comments, notes and drafts can be rolled back; created customers, contacts, tasks, leads or articles cannot (a staff member deletes them). The preview says whether a change can be rolled back.';
 
 $lang['mcai_err_https'] = 'HTTPS is required.';
 $lang['mcai_err_auth'] = 'No valid credential or access was revoked.';

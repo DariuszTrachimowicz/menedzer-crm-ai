@@ -16,7 +16,7 @@ $lang['mcai_level_read'] = 'Odczyt';
 $lang['mcai_level_work'] = 'Praca';
 $lang['mcai_level_full'] = 'Pełny';
 $lang['mcai_level_read_desc'] = 'Przegląd i wyszukiwanie danych, do których ta osoba ma dostęp w CRM. Bez zmian.';
-$lang['mcai_level_work_desc'] = 'Odczyt oraz zadania, komentarze, notatki, leady, szkice odpowiedzi w zgłoszeniach i artykuły bazy wiedzy. Każda zmiana z podglądem i cofnięciem.';
+$lang['mcai_level_work_desc'] = 'Odczyt oraz zadania, komentarze, notatki, leady, szkice odpowiedzi w zgłoszeniach i szkice artykułów bazy wiedzy. Każda zmiana z podglądem; zmiany pól i własne wpisy da się cofnąć.';
 $lang['mcai_level_full_desc'] = 'Praca oraz klienci, kontakty, projekty i dokumenty sprzedaży (jako szkice). Bez usuwania danych i bez wysyłek do klientów.';
 
 $lang['mcai_start_title'] = 'Połącz asystenta AI z CRM';
@@ -94,7 +94,7 @@ $lang['mcai_consent_allow'] = 'Zatwierdź dostęp';
 $lang['mcai_consent_deny'] = 'Odmów';
 
 $lang['mcai_instructions'] = 'Zacznij od crm_status. Dostęp wynika z roli osoby w CRM i poziomu połączenia. Zmiany: najpierw crm_operation_preview, potem crm_operation_execute. Po niejasnym wyniku odczytaj crm_operation_status, nie ponawiaj zapisu.';
-$lang['mcai_rules_for_ai'] = 'Nie usuwasz danych. Nic nie wysyłasz klientom: odpowiedzi i dokumenty zapisujesz jako szkice, wysyła je pracownik. Każda zmiana ma podgląd, wykonanie i możliwość cofnięcia.';
+$lang['mcai_rules_for_ai'] = 'Nie usuwasz danych. Nic nie wysyłasz klientom: odpowiedzi i artykuły zapisujesz jako szkice, wysyła i publikuje pracownik. Każda zmiana ma podgląd. Cofnąć można zmianę pól oraz własny komentarz, notatkę i szkic; utworzonego klienta, kontaktu, zadania, leada czy artykułu nie cofasz (usuwa je pracownik). Podgląd mówi, czy zmiana będzie do cofnięcia.';
 
 $lang['mcai_err_https'] = 'Połączenie wymaga HTTPS.';
 $lang['mcai_err_auth'] = 'Brak ważnego poświadczenia albo dostęp został odcięty.';
