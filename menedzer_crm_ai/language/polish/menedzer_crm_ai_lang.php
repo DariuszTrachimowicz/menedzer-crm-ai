@@ -119,3 +119,4 @@ $lang['mcai_update_available'] = 'Dostępna nowa wersja modułu:';
 $lang['mcai_update_now'] = 'Aktualizuj teraz';
 $lang['mcai_update_failed'] = 'Aktualizacja nie powiodła się. Moduł działa w dotychczasowej wersji.';
 $lang['mcai_updated'] = 'Zaktualizowano do wersji';
+$lang['mcai_update_restore'] = 'Aktualizacja nie powiodła się i nie udało się samoczynnie przywrócić poprzedniej wersji. Kopia jest w katalogu:';

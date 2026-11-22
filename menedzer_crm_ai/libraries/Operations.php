@@ -11,14 +11,16 @@ defined('BASEPATH') or exit('No direct script access allowed');
  * - Piszemy bezpośrednio do tabel, bez modeli Perfexa: żadna zmiana nie wysyła maila ani powiadomienia.
  * - Nic, co widzi klient: artykuły bazy wiedzy tylko jako wewnętrzne szkice, bez komentarzy
  *   i zmian treści w zadaniach widocznych dla klienta, szkice odpowiedzi jako notatki wewnętrzne.
- * - Usuwania istniejących danych nie ma. Cofnięcie utworzenia usuwa wyłącznie rekord tej operacji,
- *   jeśli nikt go od tego czasu nie zmienił i nic do niego nie dopiął.
- * - Wykonanie i cofnięcie: jedna transakcja z blokadą wiersza operacji i rekordu docelowego,
- *   uprawnienia sprawdzane w tej samej transakcji, stan operacji zapisywany razem ze zmianą.
+ * - Usuwania danych nie ma. Cofnąć można zmianę pól oraz własny komentarz, notatkę i szkic
+ *   odpowiedzi (nic się do nich nie dopina). Nowego klienta, kontakt, zadanie, lead czy artykuł
+ *   usuwa w razie potrzeby człowiek w panelu, bo pewnego sprawdzenia zależności w Perfexie nie ma.
+ * - Wykonanie i cofnięcie: jedna transakcja; w niej od nowa połączenie, poziom, rola, widoczność
+ *   i blokada rekordu; stan operacji zapisywany razem ze zmianą.
  */
 final class Operations
 {
     private const TTL = 900;
+    private const PLAN_VERSION = 2;
     public const ID_PATTERN = '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$';
 
     private static function actions(): array
@@ -33,32 +35,37 @@ final class Operations
         $contactF = ['firstname' => 'text:191', 'lastname' => 'text:191', 'email' => 'email', 'phonenumber' => 'text:100', 'title' => 'text:100'];
         return [
             'task.create' => ['level' => 'work', 'mode' => 'create', 'table' => 'tasks', 'pk' => 'id', 'req' => ['name'],
-                'f' => $taskF + ['rel_type' => 'enum:customer,project,lead,ticket', 'rel_id' => 'int:1-', 'assignees' => 'staff[]'], 'desc' => 'Nowe zadanie wewnętrzne (niewidoczne dla klienta), opcjonalnie przy kliencie, projekcie, leadzie lub zgłoszeniu i z przypisanymi osobami.'],
+                'f' => $taskF + ['rel_type' => 'enum:customer,project,lead,ticket', 'rel_id' => 'int:1-', 'assignees' => 'staff[]'], 'desc' => 'Nowe zadanie wewnętrzne (niewidoczne dla klienta), opcjonalnie przy kliencie, projekcie, leadzie lub zgłoszeniu i z przypisanymi osobami. Bez cofania.'],
             'task.update' => ['level' => 'work', 'mode' => 'update', 'table' => 'tasks', 'pk' => 'id', 'resource' => 'tasks', 'f' => $taskF,
                 'desc' => 'Zmiana pól zadania. Osoba przypisana bez prawa edycji zmienia tylko status. W zadaniu widocznym dla klienta bez zmiany nazwy i opisu.'],
-            'task.comment' => ['level' => 'work', 'mode' => 'create', 'table' => 'task_comments', 'pk' => 'id', 'parent' => 'tasks', 'req' => ['content'], 'f' => ['content' => 'html'],
+            'task.comment' => ['level' => 'work', 'mode' => 'create', 'leaf' => true, 'table' => 'task_comments', 'pk' => 'id', 'parent' => 'tasks', 'req' => ['content'], 'f' => ['content' => 'html'],
                 'desc' => 'Komentarz do zadania niewidocznego dla klienta (target_id = id zadania).'],
-            'note.create' => ['level' => 'work', 'mode' => 'create', 'table' => 'notes', 'pk' => 'id', 'req' => ['rel_type', 'rel_id', 'description'],
+            'note.create' => ['level' => 'work', 'mode' => 'create', 'leaf' => true, 'table' => 'notes', 'pk' => 'id', 'req' => ['rel_type', 'rel_id', 'description'],
                 'f' => ['rel_type' => 'enum:customer,lead', 'rel_id' => 'int:1-', 'description' => 'text:10000'], 'desc' => 'Notatka wewnętrzna przy kliencie lub leadzie.'],
-            'ticket.draft_reply' => ['level' => 'work', 'mode' => 'create', 'table' => 'notes', 'pk' => 'id', 'parent' => 'tickets', 'req' => ['message'], 'f' => ['message' => 'text:20000'],
+            'ticket.draft_reply' => ['level' => 'work', 'mode' => 'create', 'leaf' => true, 'table' => 'notes', 'pk' => 'id', 'parent' => 'tickets', 'req' => ['message'], 'f' => ['message' => 'text:20000'],
                 'desc' => 'Szkic odpowiedzi jako notatka wewnętrzna zgłoszenia (target_id = id zgłoszenia). Nic nie trafia do klienta; wysyła pracownik.'],
             'ticket.update' => ['level' => 'work', 'mode' => 'update', 'table' => 'tickets', 'pk' => 'ticketid', 'resource' => 'tickets',
                 'f' => ['status' => 'ref:tickets_status.ticketstatusid', 'priority' => 'ref:tickets_priorities.priorityid', 'assigned' => 'staff', 'department' => 'ref:departments.departmentid'],
                 'desc' => 'Status, priorytet, dział lub osoba przypisana, bez maila do klienta.'],
-            'lead.create' => ['level' => 'work', 'mode' => 'create', 'table' => 'leads', 'pk' => 'id', 'req' => ['name'], 'f' => $leadF, 'desc' => 'Nowy lead.'],
+            'lead.create' => ['level' => 'work', 'mode' => 'create', 'table' => 'leads', 'pk' => 'id', 'req' => ['name'], 'f' => $leadF, 'desc' => 'Nowy lead. Bez cofania.'],
             'lead.update' => ['level' => 'work', 'mode' => 'update', 'table' => 'leads', 'pk' => 'id', 'resource' => 'leads', 'f' => $leadF, 'desc' => 'Zmiana pól leada.'],
             'kb.create' => ['level' => 'work', 'mode' => 'create', 'table' => 'knowledge_base', 'pk' => 'articleid', 'req' => ['subject', 'description', 'articlegroup'], 'f' => $kbF,
-                'desc' => 'Artykuł bazy wiedzy jako nieaktywny szkic wewnętrzny. Publikuje pracownik w panelu.'],
+                'desc' => 'Artykuł bazy wiedzy jako nieaktywny szkic wewnętrzny. Publikuje pracownik w panelu. Bez cofania.'],
             'kb.update' => ['level' => 'work', 'mode' => 'update', 'table' => 'knowledge_base', 'pk' => 'articleid', 'resource' => 'knowledge_base', 'f' => $kbF,
                 'desc' => 'Zmiana artykułu, który jest nieaktywnym szkicem. Opublikowanych nie zmienia.'],
-            'customer.create' => ['level' => 'full', 'mode' => 'create', 'table' => 'clients', 'pk' => 'userid', 'req' => ['company'], 'f' => $custF, 'desc' => 'Nowy klient (firma).'],
+            'customer.create' => ['level' => 'full', 'mode' => 'create', 'table' => 'clients', 'pk' => 'userid', 'req' => ['company'], 'f' => $custF, 'desc' => 'Nowy klient (firma). Bez cofania.'],
             'customer.update' => ['level' => 'full', 'mode' => 'update', 'table' => 'clients', 'pk' => 'userid', 'resource' => 'customers', 'f' => $custF, 'desc' => 'Zmiana danych klienta.'],
             'contact.create' => ['level' => 'full', 'mode' => 'create', 'table' => 'contacts', 'pk' => 'id', 'req' => ['userid', 'firstname', 'lastname', 'email'], 'f' => ['userid' => 'int:1-'] + $contactF,
-                'desc' => 'Nowy kontakt klienta, bez hasła i bez maila powitalnego.'],
+                'desc' => 'Nowy kontakt klienta, bez hasła i bez maila powitalnego. Bez cofania.'],
             'contact.update' => ['level' => 'full', 'mode' => 'update', 'table' => 'contacts', 'pk' => 'id', 'resource' => 'contacts', 'f' => $contactF, 'desc' => 'Zmiana danych kontaktu.'],
             'project.update' => ['level' => 'full', 'mode' => 'update', 'table' => 'projects', 'pk' => 'id', 'resource' => 'projects',
                 'f' => ['status' => 'int:1-5', 'start_date' => 'date', 'deadline' => 'date', 'progress' => 'int:0-100'], 'desc' => 'Status, daty i postęp projektu.'],
         ];
+    }
+
+    private static function rollbackable(array $def): bool
+    {
+        return $def['mode'] === 'update' || !empty($def['leaf']);
     }
 
     public static function catalog(string $level): array
@@ -66,7 +73,7 @@ final class Operations
         $out = [];
         foreach (self::actions() as $name => $a) {
             if (Levels::atLeast($level, $a['level'])) {
-                $out[$name] = ['description' => $a['desc'], 'target_id' => $a['mode'] === 'update' || isset($a['parent']), 'fields' => $a['f'], 'required' => $a['req'] ?? []];
+                $out[$name] = ['description' => $a['desc'], 'target_id' => $a['mode'] === 'update' || isset($a['parent']), 'fields' => $a['f'], 'required' => $a['req'] ?? [], 'rollback' => self::rollbackable($a)];
             }
         }
         return $out;
@@ -84,9 +91,9 @@ final class Operations
                 'inputSchema' => ['type' => 'object', 'required' => ['operation_id', 'confirm', 'idempotency_key'], 'additionalProperties' => false, 'properties' => [
                     'operation_id' => $op, 'confirm' => ['type' => 'boolean'], 'idempotency_key' => ['type' => 'string', 'maxLength' => 100],
                 ]], 'annotations' => ['readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true]],
-            ['name' => 'crm_operation_status', 'title' => 'Stan operacji', 'description' => 'Stan operacji: previewed, verified, failed, conflict, expired, rolled_back.',
+            ['name' => 'crm_operation_status', 'title' => 'Stan operacji', 'description' => 'Stan operacji: previewed, verified, conflict, expired, rolled_back.',
                 'inputSchema' => ['type' => 'object', 'required' => ['operation_id'], 'additionalProperties' => false, 'properties' => ['operation_id' => $op]], 'annotations' => ['readOnlyHint' => true]],
-            ['name' => 'crm_operation_rollback', 'title' => 'Cofnij zmianę', 'description' => 'Przywraca stan sprzed operacji, jeśli od tego czasu nikt nie zmienił rekordu ani nic do niego nie dopiął.',
+            ['name' => 'crm_operation_rollback', 'title' => 'Cofnij zmianę', 'description' => 'Przywraca stan sprzed zmiany pól albo usuwa własny komentarz, notatkę lub szkic, jeśli nikt ich od tego czasu nie zmienił.',
                 'inputSchema' => ['type' => 'object', 'required' => ['operation_id', 'confirm'], 'additionalProperties' => false, 'properties' => ['operation_id' => $op, 'confirm' => ['type' => 'boolean']]],
                 'annotations' => ['readOnlyHint' => false, 'destructiveHint' => false]],
         ];
@@ -101,16 +108,30 @@ final class Operations
             case 'crm_operation_preview':
                 return self::preview($c, $level, (string) $a['action'], isset($a['target_id']) ? (int) $a['target_id'] : null, (array) $a['change']);
             case 'crm_operation_execute':
-                return self::execute($c, $level, (string) $a['operation_id'], (string) $a['idempotency_key']);
+                return self::execute($c, (string) $a['operation_id'], (string) $a['idempotency_key']);
             case 'crm_operation_status':
                 return self::public(self::load($c, (string) $a['operation_id'], false));
             case 'crm_operation_rollback':
-                return self::rollback($c, $level, (string) $a['operation_id']);
+                return self::rollback($c, (string) $a['operation_id']);
         }
         throw new Failure('unknown_tool', _l('mcai_err_tool'), 404);
     }
 
     // ---- walidacja ----
+
+    /** Oczyszczanie HTML od AI własną konfiguracją, niezależnie od filtrów Perfexa. Bez oczyszczacza: sam tekst. */
+    private static function purify(string $html): string
+    {
+        static $purifier = null;
+        if ($purifier === null && class_exists('HTMLPurifier')) {
+            $config = \HTMLPurifier_Config::createDefault();
+            $config->set('Cache.DefinitionImpl', null);
+            $config->set('HTML.Allowed', 'p,br,b,strong,i,em,u,ul,ol,li,a[href],h2,h3,h4,blockquote,code,pre,table,thead,tbody,tr,th,td');
+            $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true]);
+            $purifier = new \HTMLPurifier($config);
+        }
+        return $purifier ? $purifier->purify($html) : nl2br(htmlspecialchars(strip_tags($html), ENT_QUOTES, 'UTF-8'));
+    }
 
     private static function value(string $field, string $type, $v)
     {
@@ -126,8 +147,7 @@ final class Operations
                 if (!is_string($v) || strlen($v) > 200000) {
                     throw $bad();
                 }
-                // Bez oczyszczacza Perfexa zapisujemy sam tekst: atrybuty HTML mogłyby nieść skrypt.
-                return function_exists('html_purify') ? html_purify($v) : htmlspecialchars(strip_tags($v), ENT_QUOTES, 'UTF-8');
+                return self::purify($v);
             case 'email':
                 if (!is_string($v) || !filter_var($v, FILTER_VALIDATE_EMAIL) || strlen($v) > 100) {
                     throw $bad();
@@ -199,7 +219,7 @@ final class Operations
 
     /**
      * Uprawnienia z roli Perfexa i ograniczenia „nic dla klienta”. $current to rekord docelowy
-     * (dla update) albo nadrzędny (komentarz, szkic odpowiedzi), pobrany w bieżącej transakcji.
+     * (dla update) albo nadrzędny (komentarz, szkic), pobrany i zablokowany w bieżącej transakcji.
      */
     private static function authorize(string $action, int $sid, array $change, ?array $current): void
     {
@@ -219,7 +239,7 @@ final class Operations
                 }
                 return;
             case 'task.update':
-                $assigned = Store::db()->where('taskid', (int) $current['id'])->where('staffid', $sid)->count_all_results(db_prefix() . 'task_assigned') > 0;
+                $assigned = Store::db()->query('SELECT id FROM ' . db_prefix() . 'task_assigned WHERE taskid=? AND staffid=? LOCK IN SHARE MODE', [(int) $current['id'], $sid])->num_rows() > 0;
                 if (!staff_can('edit', 'tasks', $sid) && !($assigned && array_keys($change) === ['status'])) {
                     throw $deny();
                 }
@@ -294,7 +314,6 @@ final class Operations
         return $row ?: null;
     }
 
-    /** Kolumny, które zmienia aktualizacja. */
     private static function columns(string $action, array $change): array
     {
         $cols = array_keys($change);
@@ -304,22 +323,29 @@ final class Operations
         return $cols;
     }
 
-    /** Rekord docelowy lub nadrzędny, widoczny dla osoby, zablokowany w bieżącej transakcji. */
-    private static function target(array $def, array $plan, int $sid, bool $lock): ?array
+    /**
+     * Rekord docelowy lub nadrzędny: tylko pola potrzebne do autoryzacji, z warunkiem widoczności
+     * osoby w tym samym zapytaniu co blokada FOR UPDATE.
+     */
+    private static function target(array $def, ?int $id, int $sid, bool $lock): ?array
     {
         $resource = $def['resource'] ?? $def['parent'] ?? null;
         if ($resource === null) {
             return null;
         }
-        $id = (int) $plan['target_id'];
-        if (Resources::row($resource, $id, $sid) === null) {
+        $scope = Resources::scope($resource, $sid);
+        $rdef = Resources::map()[$resource];
+        if ($scope === null || $scope[0] === 'limited' || !$id) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
         }
-        $rdef = Resources::map()[$resource];
-        $row = Store::db()->query('SELECT * FROM `' . db_prefix() . $rdef['table'] . '` WHERE `' . $rdef['pk'] . '`=?' . ($lock ? ' FOR UPDATE' : ''), [$id])->row_array();
+        $fields = array_intersect(['visible_to_client', 'active'], Store::db()->list_fields(db_prefix() . $rdef['table']));
+        $cols = implode(',', array_map(fn ($c) => "`$c`", array_merge([$rdef['pk']], $fields)));
+        $where = isset($scope[1]) ? ' AND ' . $scope[1] : '';
+        $row = Store::db()->query("SELECT $cols FROM `" . db_prefix() . $rdef['table'] . "` WHERE `{$rdef['pk']}`=?$where" . ($lock ? ' FOR UPDATE' : ''), [$id])->row_array();
         if (!$row) {
             throw new Failure('not_found', _l('mcai_err_not_found'), 404);
         }
+        $row['id'] = $row[$rdef['pk']];
         return $row;
     }
 
@@ -344,11 +370,11 @@ final class Operations
             throw new Failure('invalid_change', $needsTarget ? 'Brak target_id.' : 'Ta akcja nie przyjmuje target_id.');
         }
         $change = self::normalize($def, $change, $create);
-        $plan = ['action' => $action, 'target_id' => $target, 'change' => $change];
-        $current = $needsTarget ? self::target($def, $plan, $sid, false) : null;
+        $current = self::target($def, $target, $sid, false);
         self::authorize($action, $sid, $change, $current);
         self::checkContact($action, $change, $target);
         $before = $create ? [] : self::snapshot($def, $target, self::columns($action, $change), false);
+        $plan = ['v' => self::PLAN_VERSION, 'action' => $action, 'target_id' => $target, 'change' => $change];
         $id = self::uuid();
         Store::db()->insert(Store::table('operations'), [
             'id' => $id, 'connection_id' => $c['id'], 'staff_id' => $sid, 'action' => $action, 'resource' => $def['table'],
@@ -357,10 +383,11 @@ final class Operations
             'status' => 'previewed', 'created_at' => time(), 'expires_at' => time() + self::TTL,
         ]);
         return ['operation_id' => $id, 'status' => 'previewed', 'action' => $action, 'target_id' => $target, 'before' => $before ?: null, 'after' => $change,
-            'expires_at' => date('c', time() + self::TTL), 'next' => 'Pokaż podgląd użytkownikowi; po akceptacji crm_operation_execute z confirm=true.'];
+            'rollback' => self::rollbackable($def), 'expires_at' => date('c', time() + self::TTL),
+            'next' => 'Pokaż podgląd użytkownikowi; po akceptacji crm_operation_execute z confirm=true.'];
     }
 
-    /** Unikalny e-mail kontaktu; przy wykonaniu wołane pod blokadą „contacts”. */
+    /** Unikalny e-mail kontaktu. Przy wykonaniu i cofnięciu wołane pod blokadą „contacts” trzymaną do commitu. */
     private static function checkContact(string $action, array $change, ?int $target): void
     {
         if (!in_array($action, ['contact.create', 'contact.update'], true) || !isset($change['email'])) {
@@ -391,83 +418,97 @@ final class Operations
 
     private static function public(array $op): array
     {
+        $def = self::actions()[$op['action']] ?? null;
         return ['operation_id' => $op['id'], 'status' => $op['status'], 'action' => $op['action'], 'target_id' => (int) $op['target_id'] ?: null,
-            'new_id' => (int) $op['new_id'] ?: null, 'rollback_available' => $op['status'] === 'verified', 'updated_at' => (int) $op['updated_at'] ? date('c', (int) $op['updated_at']) : null];
-    }
-
-    private static function setStatus(string $id, string $status, array $extra = []): void
-    {
-        Store::db()->where('id', $id)->update(Store::table('operations'), $extra + ['status' => $status, 'updated_at' => time()]);
-    }
-
-    /**
-     * Wspólna rama: transakcja, blokada wiersza operacji, praca, zapis stanu w tej samej transakcji.
-     * Gdy praca zgłosi konflikt albo błąd, zmiany CRM są wycofane, a stan operacji zapisany osobno.
-     */
-    private static function transact(array $c, string $id, callable $work): array
-    {
-        $db = Store::db();
-        $db->trans_begin();
-        try {
-            $op = self::load($c, $id, true);
-            [$status, $extra, $result] = $work($op);
-            self::setStatus($id, $status, $extra);
-            if ($db->trans_status() === false) {
-                throw new \RuntimeException('db');
-            }
-            $db->trans_commit();
-            return $result + self::public(array_merge($op, $extra, ['status' => $status, 'updated_at' => time()]));
-        } catch (\Throwable $e) {
-            $db->trans_rollback();
-            if ($e instanceof Failure && $e->opStatus !== null) {
-                self::setStatus($id, $e->opStatus);
-            }
-            if ($e instanceof Failure) {
-                throw $e;
-            }
-            log_message('error', 'Menedzer CRM AI operacja: ' . $e->getMessage());
-            throw new Failure('failed', 'Zapis nie powiódł się; nic nie zostało zmienione.', 500);
-        }
+            'new_id' => (int) $op['new_id'] ?: null, 'rollback_available' => $op['status'] === 'verified' && $def && self::rollbackable($def),
+            'updated_at' => (int) $op['updated_at'] ? date('c', (int) $op['updated_at']) : null];
     }
 
     private static function fail(string $code, string $message, ?string $opStatus = null): Failure
     {
         $f = new Failure($code, $message, 409);
-        if ($opStatus !== null) {
-            $f->opStatus = $opStatus;
-        }
+        $f->opStatus = $opStatus;
         return $f;
     }
 
-    private static function execute(array $c, string $level, string $id, string $key): array
+    /**
+     * Wspólna rama wykonania i cofnięcia. W transakcji: blokada wiersza operacji, świeże połączenie
+     * i poziom, praca, zapis stanu. Konflikt lub wygaśnięcie zapisujemy po wycofaniu, tylko ze stanu previewed.
+     */
+    private static function transact(array $c, string $id, callable $work): array
+    {
+        $db = Store::db();
+        $peek = self::load($c, $id, false);
+        $contacts = str_starts_with($peek['action'], 'contact.');
+        if ($contacts && !Store::lock('contacts', 5)) {
+            throw self::fail('busy', 'Spróbuj ponownie za chwilę.');
+        }
+        try {
+            if (!$db->trans_begin()) {
+                throw new \RuntimeException('trans_begin');
+            }
+            try {
+                $op = self::load($c, $id, true);
+                $fresh = Connections::fresh($c['id']);
+                $level = $fresh ? Connections::effective($fresh) : null;
+                if ($level === null) {
+                    throw new Failure('unauthorized', _l('mcai_err_auth'), 401);
+                }
+                $plan = json_decode($op['plan'], true);
+                $def = self::actions()[$op['action']] ?? null;
+                if (!is_array($plan) || ($plan['v'] ?? 0) !== self::PLAN_VERSION || !$def) {
+                    throw self::fail('expired', 'Ta operacja pochodzi ze starszej wersji modułu. Przygotuj nowy podgląd.', 'expired');
+                }
+                if (!Levels::atLeast($level, $def['level'])) {
+                    throw new Failure('forbidden', _l('mcai_err_level'), 403);
+                }
+                [$status, $extra] = $work($op, $plan, $def, (int) $fresh['staff_id']);
+                $extra += ['status' => $status, 'updated_at' => time()];
+                $db->where('id', $id)->update(Store::table('operations'), $extra);
+                if ($db->trans_status() === false || !$db->trans_commit()) {
+                    throw new \RuntimeException('commit');
+                }
+                return self::public(array_merge($op, $extra));
+            } catch (\Throwable $e) {
+                $db->trans_rollback();
+                if ($e instanceof Failure && $e->opStatus !== null) {
+                    $db->where('id', $id)->where('status', 'previewed')->update(Store::table('operations'), ['status' => $e->opStatus, 'updated_at' => time()]);
+                }
+                if ($e instanceof Failure) {
+                    throw $e;
+                }
+                log_message('error', 'Menedzer CRM AI operacja: ' . $e->getMessage());
+                throw new Failure('failed', 'Zapis nie powiódł się; nic nie zostało zmienione.', 500);
+            }
+        } finally {
+            if ($contacts) {
+                Store::unlock('contacts');
+            }
+        }
+    }
+
+    private static function execute(array $c, string $id, string $key): array
     {
         $keyHash = hash('sha256', $key);
-        return self::transact($c, $id, function (array $op) use ($c, $level, $keyHash) {
+        return self::transact($c, $id, function (array $op, array $plan, array $def, int $sid) use ($c, $keyHash) {
             if ($op['status'] !== 'previewed') {
                 if ($op['execution_key'] === $keyHash) {
-                    return [$op['status'], [], []]; // to samo wykonanie: zwracamy zapisany wynik
+                    return [$op['status'], []]; // to samo wykonanie: zwracamy zapisany wynik
                 }
                 throw self::fail('already_executed', 'Ta operacja została już wykonana albo zamknięta.');
             }
             if ((int) $op['expires_at'] < time()) {
                 throw self::fail('expired', 'Podgląd wygasł. Przygotuj nowy.', 'expired');
             }
-            $plan = json_decode($op['plan'], true);
-            $def = self::actions()[$plan['action']];
-            $sid = (int) $c['staff_id'];
-            if (!Levels::atLeast($level, $def['level'])) {
-                throw new Failure('forbidden', _l('mcai_err_level'), 403);
-            }
-            $current = self::target($def, $plan, $sid, true);
+            $create = $def['mode'] === 'create';
+            // Plan przechodzi walidację od nowa według bieżących reguł.
+            $plan['change'] = self::normalize($def, $plan['change'], $create);
+            $current = self::target($def, $plan['target_id'] ?? null, $sid, true);
             self::authorize($plan['action'], $sid, $plan['change'], $current);
-            $extra = ['execution_key' => $keyHash];
-            if ($def['mode'] === 'update') {
-                $extra += self::applyUpdate($op, $def, $plan);
-            } else {
-                $extra += self::applyCreate($def, $plan, $sid);
-            }
+            self::checkContact($plan['action'], $plan['change'], $plan['target_id'] ?? null);
+            $extra = ['execution_key' => $keyHash] + ($create ? self::applyCreate($def, $plan, $sid) : self::applyUpdate($op, $def, $plan));
             Connections::audit($c, 'operation.' . $plan['action'], 'verified', $op['id']);
-            return ['verified', $extra, []];
+            return ['verified', $extra];
         });
     }
 
@@ -531,62 +572,46 @@ final class Operations
                 $row = $ch + ['datecreated' => $now, 'addedfrom' => $sid, 'active' => 1, 'country' => 0, 'show_primary_contact' => 0, 'registration_confirmed' => 1, 'default_currency' => 0, 'default_language' => ''];
                 break;
             case 'contact.create':
-                // Unikalność e-maila i jeden kontakt główny: sprawdzane ponownie pod blokadą.
-                if (!Store::lock('contacts', 5)) {
-                    throw self::fail('busy', 'Spróbuj ponownie za chwilę.');
-                }
-                try {
-                    self::checkContact('contact.create', $ch, null);
-                    $primary = $db->where('userid', $ch['userid'])->where('is_primary', 1)->count_all_results($p . 'contacts') === 0 ? 1 : 0;
-                    $row = $ch + ['phonenumber' => '', 'is_primary' => $primary, 'datecreated' => $now, 'active' => 1, 'email_verified_at' => $now];
-                    $db->insert($p . $def['table'], $row);
-                    $newId = (int) $db->insert_id();
-                } finally {
-                    Store::unlock('contacts');
-                }
+                // Pod blokadą „contacts” (transact): e-mail sprawdzony w tej transakcji, jeden kontakt główny.
+                $primary = $db->query("SELECT id FROM {$p}contacts WHERE userid=? AND is_primary=1 FOR UPDATE", [$ch['userid']])->num_rows() === 0 ? 1 : 0;
+                $row = $ch + ['phonenumber' => '', 'is_primary' => $primary, 'datecreated' => $now, 'active' => 1, 'email_verified_at' => $now];
                 break;
             default:
                 throw new \RuntimeException('action');
         }
-        if (!isset($newId)) {
-            $db->insert($p . $def['table'], $row);
-            $newId = (int) $db->insert_id();
-        }
+        $db->insert($p . $def['table'], $row);
+        $newId = (int) $db->insert_id();
         if ($newId < 1) {
             throw new \RuntimeException('insert');
         }
-        $links = [];
         foreach ($ch['assignees'] ?? [] as $staff) {
             $db->insert($p . 'task_assigned', ['staffid' => $staff, 'taskid' => $newId, 'assigned_from' => $sid, 'is_assigned_from_contact' => 0]);
-            $links[] = (int) $db->insert_id();
         }
         $after = self::snapshot($def, $newId, null, true);
         if ($after === null) {
             throw new \RuntimeException('verify');
         }
-        // Kopia całego rekordu i dokładnych powiązań utworzonych przez tę operację.
-        return ['new_id' => $newId, 'after_hash' => self::hash($after), 'before_state' => Store::json(['links' => $links])];
+        return ['new_id' => $newId, 'after_hash' => self::hash($after)];
     }
 
-    private static function rollback(array $c, string $level, string $id): array
+    private static function rollback(array $c, string $id): array
     {
-        return self::transact($c, $id, function (array $op) use ($c, $level) {
-            if ($op['status'] !== 'verified') {
-                throw self::fail('rollback_unavailable', 'Cofnąć można tylko wykonaną i sprawdzoną operację.');
-            }
-            $plan = json_decode($op['plan'], true);
-            $def = self::actions()[$plan['action']];
-            $sid = (int) $c['staff_id'];
-            if (!Levels::atLeast($level, $def['level'])) {
-                throw new Failure('forbidden', _l('mcai_err_level'), 403);
+        return self::transact($c, $id, function (array $op, array $plan, array $def, int $sid) use ($c) {
+            if ($op['status'] !== 'verified' || !self::rollbackable($def)) {
+                throw self::fail('rollback_unavailable', self::rollbackable($def) ? 'Cofnąć można tylko wykonaną i sprawdzoną operację.' : 'Tej akcji nie cofa AI. Rekord usuwa pracownik w panelu.');
             }
             $db = Store::db();
             $p = db_prefix();
-            // Cofnięcie wymaga dziś tych samych praw co wykonanie.
-            $current = self::target($def, $plan, $sid, true);
-            self::authorize($plan['action'], $sid, $plan['change'], $current);
+            // Cofnięcie wymaga dziś tych samych praw i widoczności co wykonanie.
+            $current = self::target($def, $plan['target_id'] ?? null, $sid, true);
             if ($def['mode'] === 'update') {
                 $before = json_decode($op['before_state'], true);
+                if (!is_array($before) || array_diff(array_keys($before), self::columns($plan['action'], array_fill_keys(array_keys($def['f']), 1)))) {
+                    throw self::fail('rollback_unavailable', 'Kopia stanu nie pasuje do tej akcji.');
+                }
+                $restore = array_diff_key($before, ['datefinished' => 1]);
+                self::authorize($plan['action'], $sid, $restore, $current);
+                self::checkContact($plan['action'], $restore, (int) $plan['target_id']);
                 $now = self::snapshot($def, (int) $plan['target_id'], array_keys($before), true);
                 if ($now === null || self::hash($now) !== $op['after_hash']) {
                     throw self::fail('conflict', 'Rekord zmienił się po tej operacji. Cofnięcie przywróciłoby cudze zmiany.');
@@ -596,56 +621,17 @@ final class Operations
                     throw new \RuntimeException('verify');
                 }
             } else {
+                // Własny komentarz, notatka lub szkic: usuwamy tylko niezmieniony wiersz tej operacji.
+                self::authorize($plan['action'], $sid, $plan['change'], $current);
                 $newId = (int) $op['new_id'];
-                $links = json_decode($op['before_state'], true)['links'] ?? [];
                 $now = self::snapshot($def, $newId, null, true);
-                if ($now === null || self::hash($now) !== $op['after_hash'] || self::hasChildren($plan['action'], $newId, $links)) {
-                    throw self::fail('conflict', 'Utworzony rekord zmienił się albo ma już powiązane dane. Nie cofam.');
-                }
-                if ($links) {
-                    $db->where_in('id', $links)->delete($p . 'task_assigned');
+                if ($now === null || self::hash($now) !== $op['after_hash']) {
+                    throw self::fail('conflict', 'Wpis zmienił się po tej operacji. Nie cofam.');
                 }
                 $db->where($def['pk'], $newId)->delete($p . $def['table']);
             }
             Connections::audit($c, 'rollback.' . $plan['action'], 'rolled_back', $op['id']);
-            return ['rolled_back', [], []];
+            return ['rolled_back', []];
         });
-    }
-
-    /** Czy do rekordu utworzonego przez AI ktoś coś dopiął. Przypisania liczą się tylko te z tej operacji. */
-    private static function hasChildren(string $action, int $id, array $links): bool
-    {
-        $p = db_prefix();
-        $db = Store::db();
-        if ($action === 'task.create') {
-            $assigned = array_map('intval', array_column($db->query("SELECT id FROM {$p}task_assigned WHERE taskid=? FOR UPDATE", [$id])->result_array(), 'id'));
-            sort($assigned);
-            sort($links);
-            if ($assigned !== array_map('intval', $links)) {
-                return true;
-            }
-        }
-        $checks = match ($action) {
-            'task.create' => [['task_followers', 'taskid'], ['task_comments', 'taskid'], ['task_checklist_items', 'taskid'], ['taskstimers', 'task_id'], ['files', 'rel_id', "rel_type='task'"], ['notes', 'rel_id', "rel_type='task'"]],
-            'customer.create' => [['contacts', 'userid'], ['invoices', 'clientid'], ['estimates', 'clientid'], ['projects', 'clientid'], ['tickets', 'userid'], ['contracts', 'client'],
-                ['customer_admins', 'customer_id'], ['customer_groups', 'customer_id'], ['notes', 'rel_id', "rel_type='customer'"], ['tasks', 'rel_id', "rel_type='customer'"],
-                ['proposals', 'rel_id', "rel_type='customer'"], ['files', 'rel_id', "rel_type='customer'"], ['expenses', 'clientid'], ['creditnotes', 'clientid']],
-            'lead.create' => [['notes', 'rel_id', "rel_type='lead'"], ['tasks', 'rel_id', "rel_type='lead'"], ['proposals', 'rel_id', "rel_type='lead'"], ['files', 'rel_id', "rel_type='lead'"]],
-            'contact.create' => [['tickets', 'contactid'], ['task_comments', 'contact_id']],
-            default => [],
-        };
-        foreach ($checks as $ch) {
-            if (!$db->table_exists($p . $ch[0])) {
-                continue;
-            }
-            $db->from($p . $ch[0])->where($ch[1], $id);
-            if (isset($ch[2])) {
-                $db->where($ch[2], null, false);
-            }
-            if ($db->count_all_results() > 0) {
-                return true;
-            }
-        }
-        return false;
     }
 }

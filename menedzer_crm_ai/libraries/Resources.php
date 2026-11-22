@@ -94,8 +94,9 @@ final class Resources
             case 'leads':
                 return $can('view') ? ['all'] : ['own', "(assigned=$sid OR addedfrom=$sid OR is_public=1)"];
             case 'tickets':
+                // Jak Tickets::ticket(): przy dostępie według działów przypisanie nie otwiera zgłoszenia z innego działu.
                 return get_option('staff_access_only_assigned_departments') == '1'
-                    ? ['own', "(department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=$sid) OR assigned=$sid)"] : ['all'];
+                    ? ['own', "department IN (SELECT departmentid FROM {$p}staff_departments WHERE staffid=$sid)"] : ['all'];
             case 'tasks':
                 return $can('view') ? ['all'] : ['own', self::taskWhere($sid)];
             case 'projects':
@@ -112,11 +113,12 @@ final class Resources
                 if ($can('view')) {
                     return ['all'];
                 }
-                $inv = self::scope('invoices', $sid);
-                if ($inv === null) {
-                    return null;
+                // Jak views/admin/tables/payments.php: pełny widok faktur nie daje pełnego widoku płatności.
+                $where = "invoiceid IN (SELECT id FROM {$p}invoices WHERE addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='invoices' AND capability='view_own'))";
+                if (get_option('allow_staff_view_invoices_assigned') == 1) {
+                    $where .= " OR invoiceid IN (SELECT id FROM {$p}invoices WHERE sale_agent=$sid)";
                 }
-                return $inv[0] === 'all' ? ['all'] : ['own', "invoiceid IN (SELECT id FROM {$p}invoices WHERE {$inv[1]})"];
+                return ['own', "($where)"];
             case 'knowledge_base':
                 return $can('view') ? ['all'] : null;
             case 'announcements':
@@ -124,25 +126,31 @@ final class Resources
             case 'events':
                 return ['own', "(userid=$sid OR public=1)"];
             case 'staff':
-                return $can('view') ? ['all'] : ['limited'];
+                // Bez prawa do personelu: tylko aktywne osoby, imię i nazwisko (do przypisań).
+                return $can('view') ? ['all'] : ['limited', 'active=1'];
         }
         return null;
     }
 
+    /** Jak get_tasks_where_string() w Perfexie (tasks_helper.php). */
     public static function taskWhere(int $sid): string
     {
         $p = db_prefix();
-        return "(is_public=1 OR addedfrom=$sid OR id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=$sid) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=$sid))";
+        $w = "(id IN (SELECT taskid FROM {$p}task_assigned WHERE staffid=$sid) OR id IN (SELECT taskid FROM {$p}task_followers WHERE staffid=$sid) OR (addedfrom=$sid AND is_added_from_contact=0)";
+        if (get_option('show_all_tasks_for_project_member') == 1) {
+            $w .= " OR (rel_type='project' AND rel_id IN (SELECT project_id FROM {$p}project_members WHERE staff_id=$sid))";
+        }
+        return $w . ' OR is_public=1)';
     }
 
-    /** Faktury, wyceny, propozycje: jak get_invoices_where_sql_for_staff() itd. w Perfexie. */
+    /** Faktury, wyceny, propozycje: jak get_invoices_where_sql_for_staff() itd. w Perfexie, z warunkiem praw w samym SQL. */
     private static function salesWhere(string $resource, int $sid): ?string
     {
         $p = db_prefix();
         $agent = $resource === 'proposals' ? 'assigned' : 'sale_agent';
         $assignedAllowed = get_option('allow_staff_view_' . $resource . '_assigned') == 1;
         if (staff_can('view_own', $resource, $sid)) {
-            return "(addedfrom=$sid" . ($assignedAllowed ? " OR $agent=$sid" : '') . ')';
+            return "((addedfrom=$sid AND addedfrom IN (SELECT staff_id FROM {$p}staff_permissions WHERE feature='$resource' AND capability='view_own'))" . ($assignedAllowed ? " OR $agent=$sid" : '') . ')';
         }
         return $assignedAllowed ? "$agent=$sid" : null;
     }
@@ -191,7 +199,7 @@ final class Resources
 
     private static function applyScope(\CI_DB_query_builder $db, array $scope): void
     {
-        if ($scope[0] === 'own') {
+        if (isset($scope[1])) {
             $db->where($scope[1], null, false);
         }
     }

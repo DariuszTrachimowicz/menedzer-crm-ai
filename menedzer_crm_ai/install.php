@@ -51,5 +51,7 @@ $sql = [
 ];
 
 foreach ($sql as $query) {
-    $CI->db->query($query . $suffix);
+    if (!$CI->db->query($query . $suffix)) {
+        throw new RuntimeException('Menedzer CRM AI: instalacja tabel nie powiodła się.');
+    }
 }

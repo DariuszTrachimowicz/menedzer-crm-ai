@@ -16,10 +16,19 @@ final class Updater
     {
         $ch = curl_init($url);
         $headers = [];
+        $body = '';
         curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => $follow, CURLOPT_MAXREDIRS => 5, CURLOPT_TIMEOUT => 30,
+            CURLOPT_FOLLOWLOCATION => $follow, CURLOPT_MAXREDIRS => 5, CURLOPT_TIMEOUT => 30,
             CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => 'menedzer-crm-ai/' . MCAI_VERSION,
             CURLOPT_MAXFILESIZE => self::MAX_ZIP,
+            // Liczymy odebrane bajty sami: starsze libcurl nie pilnują limitu bez nagłówka rozmiaru.
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$body) {
+                if (strlen($body) + strlen($chunk) > self::MAX_ZIP) {
+                    return 0;
+                }
+                $body .= $chunk;
+                return strlen($chunk);
+            },
             CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$headers) {
                 if (stripos($line, 'location:') === 0) {
                     $headers['location'] = trim(substr($line, 9));
@@ -27,11 +36,11 @@ final class Updater
                 return strlen($line);
             },
         ]);
-        $body = curl_exec($ch);
+        $ok = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
         $location = $headers['location'] ?? null;
-        return is_string($body) ? $body : null;
+        return $ok === false ? null : $body;
     }
 
     /** Najnowsza wersja z przekierowania releases/latest (bez API i jego limitu). Pamięć 12 godzin. */
@@ -113,20 +122,30 @@ final class Updater
             if (!rename($new . '/menedzer_crm_ai', $dir)) {
                 throw $fail();
             }
-            // Nowe tabele (CREATE IF NOT EXISTS) z kodu nowej wersji, potem numer wersji w Perfexie.
+            // Nowe tabele (CREATE IF NOT EXISTS) z kodu nowej wersji; install.php rzuca wyjątek przy błędzie SQL.
             require $dir . '/install.php';
-            Store::db()->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
+            $db = Store::db();
+            $db->where('module_name', MCAI_MODULE)->update(db_prefix() . 'modules', ['installed_version' => $version]);
+            $saved = $db->select('installed_version')->where('module_name', MCAI_MODULE)->get(db_prefix() . 'modules')->row_array();
+            if (($saved['installed_version'] ?? '') !== $version) {
+                throw $fail();
+            }
             update_option('mcai_latest', Store::json(['checked' => 0, 'version' => '']));
             $swapped = false;
             self::remove($old);
         } catch (\Throwable $e) {
             if ($swapped) {
                 // Przywrócenie poprzedniej wersji w miejsce nieudanej.
-                if (is_dir($dir)) {
-                    rename($dir, $new . '-failed');
-                    self::remove($new . '-failed');
+                $failed = $new . '-failed';
+                if (is_dir($dir) && !rename($dir, $failed)) {
+                    log_message('error', 'Menedzer CRM AI: nie można odsunąć nieudanej wersji; poprzednia jest w ' . $old);
+                    throw new Failure('update_failed', _l('mcai_update_restore') . ' ' . $old);
                 }
-                rename($old, $dir);
+                if (!rename($old, $dir)) {
+                    log_message('error', 'Menedzer CRM AI: nie można przywrócić poprzedniej wersji z ' . $old);
+                    throw new Failure('update_failed', _l('mcai_update_restore') . ' ' . $old);
+                }
+                self::remove($failed);
             }
             throw $e instanceof Failure ? $e : $fail();
         } finally {

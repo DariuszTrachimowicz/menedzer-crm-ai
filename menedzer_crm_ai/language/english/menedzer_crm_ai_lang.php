@@ -119,3 +119,4 @@ $lang['mcai_update_available'] = 'A new module version is available:';
 $lang['mcai_update_now'] = 'Update now';
 $lang['mcai_update_failed'] = 'Update failed. The module keeps running the current version.';
 $lang['mcai_updated'] = 'Updated to version';
+$lang['mcai_update_restore'] = 'Update failed and the previous version could not be restored automatically. The copy is in:';

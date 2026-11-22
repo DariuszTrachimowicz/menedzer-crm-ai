@@ -103,10 +103,15 @@ async function authorize(page, clientId, scope) {
   const r2 = await form(ISS + '/oauth/token', { grant_type: 'refresh_token', client_id: client.client_id, refresh_token: a.token.body.refresh_token, resource: ISS + '/mcp' });
   const afterRefreshReplay = await rpc(r1.body.access_token, 'ping', {});
   check(r2.status === 400 && afterRefreshReplay.status === 401, 'ponowny refresh tym samym tokenem zrywa połączenie (RFC 9700)', r2.status + '/' + afterRefreshReplay.status);
-  const codeAgain = await form(ISS + '/oauth/token', { grant_type: 'authorization_code', client_id: client.client_id, code: a.code, redirect_uri: REDIRECT, code_verifier: a.verifier, resource: ISS + '/mcp' });
-  check(codeAgain.status === 400 && codeAgain.body.error === 'invalid_grant', 'ponowne użycie kodu odrzucone');
-  const afterReplay = await rpc(r1.body.access_token, 'ping', {});
-  check(afterReplay.status === 401, 'powtórka kodu odcina połączenie (RFC 6749)', afterReplay.status);
+  // Powtórka kodu na osobnym, świeżym połączeniu: zły weryfikator nic nie zrywa, dobry zrywa.
+  const a3 = await authorize(admin.page, client.client_id, 'read');
+  const A3 = a3.token.body.access_token;
+  const wrongVerifier = await form(ISS + '/oauth/token', { grant_type: 'authorization_code', client_id: client.client_id, code: a3.code, redirect_uri: REDIRECT, code_verifier: 'x'.repeat(43), resource: ISS + '/mcp' });
+  const aliveAfterWrong = await rpc(A3, 'ping', {});
+  check(wrongVerifier.status === 400 && aliveAfterWrong.status === 200, 'powtórka kodu bez PKCE nie zrywa połączenia', wrongVerifier.status + '/' + aliveAfterWrong.status);
+  const codeAgain = await form(ISS + '/oauth/token', { grant_type: 'authorization_code', client_id: client.client_id, code: a3.code, redirect_uri: REDIRECT, code_verifier: a3.verifier, resource: ISS + '/mcp' });
+  const afterReplay = await rpc(A3, 'ping', {});
+  check(codeAgain.status === 400 && afterReplay.status === 401, 'powtórka kodu z PKCE zrywa połączenie (RFC 6749)', codeAgain.status + '/' + afterReplay.status);
 
   // 4. Pracownik spoza listy
   const jan = await login(browser, 'jan@test.local');
@@ -161,9 +166,8 @@ async function authorize(page, clientId, scope) {
   const other = await tool(T, 'crm_operation_execute', { operation_id: c1.pv.data.operation_id, confirm: true, idempotency_key: 'inny' });
   check(other.isError && other.data.error === 'already_executed', 'inny klucz nie wykona drugi raz');
   const rb1 = await tool(T, 'crm_operation_rollback', { operation_id: c1.pv.data.operation_id, confirm: true });
-  check(!rb1.isError && rb1.data.status === 'rolled_back', 'cofnięcie utworzenia zadania', JSON.stringify(rb1.data));
-  const gone2 = await tool(T, 'crm_resource_get', { resource: 'tasks', id: c1.ex.data.new_id });
-  check(gone2.isError && gone2.data.error === 'not_found', 'po cofnięciu zadania nie ma');
+  check(rb1.isError && rb1.data.error === 'rollback_unavailable', 'utworzenia zadania AI nie cofa', JSON.stringify(rb1.data));
+  check(c1.pv.data.rollback === false && c1.ex.data.rollback_available === false, 'podgląd uprzedza, że bez cofania');
 
   const u1 = await run('task.update', { status: 5 }, 1);
   check(!u1.ex.isError && u1.pv.data.before.status === '1', 'task.update status z podglądem stanu przed', JSON.stringify(u1.pv.data.before || u1.ex.data));
@@ -184,15 +188,20 @@ async function authorize(page, clientId, scope) {
   check(!d1.ex.isError && tk2.data.related.notes.length >= 1 && tk2.data.related.replies.length === 0, 'szkic odpowiedzi jako notatka, bez odpowiedzi do klienta', JSON.stringify(d1.ex.data));
 
   const cc = await run('customer.create', { company: 'Firma od AI', city: 'Kraków' });
-  const ko = await run('contact.create', { userid: cc.ex.data.new_id, firstname: 'Ala', lastname: 'Nowa', email: 'ala@nowa.test' });
+  const mail = 'ala' + Date.now() + '@nowa.test';
+  const ko = await run('contact.create', { userid: cc.ex.data.new_id, firstname: 'Ala', lastname: 'Nowa', email: mail });
   check(!ko.ex.isError, 'kontakt dla nowego klienta', JSON.stringify(ko.ex.data));
-  const dup = await tool(T, 'crm_operation_preview', { action: 'contact.create', change: { userid: 1, firstname: 'X', lastname: 'Y', email: 'ala@nowa.test' } });
+  const kg = await tool(T, 'crm_resource_get', { resource: 'contacts', id: ko.ex.data.new_id });
+  check(kg.data.item && kg.data.item.is_primary === '1', 'pierwszy kontakt jest główny');
+  const dup = await tool(T, 'crm_operation_preview', { action: 'contact.create', change: { userid: 1, firstname: 'X', lastname: 'Y', email: mail } });
   check(dup.isError && /istnieje/.test(dup.data.message), 'duplikat e-maila kontaktu odrzucony');
   const rbC = await tool(T, 'crm_operation_rollback', { operation_id: cc.pv.data.operation_id, confirm: true });
-  check(rbC.isError && rbC.data.error === 'conflict', 'klienta z kontaktem nie da się cofnąć');
-  await tool(T, 'crm_operation_rollback', { operation_id: ko.pv.data.operation_id, confirm: true });
-  const rbC2 = await tool(T, 'crm_operation_rollback', { operation_id: cc.pv.data.operation_id, confirm: true });
-  check(!rbC2.isError, 'po cofnięciu kontaktu klient też się cofa', JSON.stringify(rbC2.data));
+  check(rbC.isError && rbC.data.error === 'rollback_unavailable', 'utworzenia klienta AI nie cofa (usuwa człowiek)');
+  const cm = await run('task.comment', { content: '<p>Notatka robocza</p>' }, 1);
+  const rbM = await tool(T, 'crm_operation_rollback', { operation_id: cm.pv.data.operation_id, confirm: true });
+  check(!cm.ex.isError && !rbM.isError && rbM.data.status === 'rolled_back', 'własny komentarz da się cofnąć', JSON.stringify(rbM.data));
+  const rbD = await tool(T, 'crm_operation_rollback', { operation_id: d1.pv.data.operation_id, confirm: true });
+  check(!rbD.isError && rbD.data.status === 'rolled_back', 'szkic odpowiedzi da się cofnąć', JSON.stringify(rbD.data));
 
   const badField = await tool(T, 'crm_operation_preview', { action: 'customer.update', target_id: 1, change: { active: 0 } });
   check(badField.isError && badField.data.error === 'invalid_change', 'pole spoza listy (active) odrzucone');
@@ -229,4 +238,4 @@ async function authorize(page, clientId, scope) {
   await browser.close();
   console.log(failures ? `\n${failures} błędów` : '\nWSZYSTKO OK');
   process.exit(failures ? 1 : 0);
-})().catch((e) => { console.error(e); process.exit(2); });
+})().catch((e) => { console.error(mask(e && e.stack || e)); process.exit(2); });
