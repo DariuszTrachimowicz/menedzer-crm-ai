@@ -30,6 +30,10 @@ Autor: Dariusz Trachimowicz, https://d-x.pl/. Licencja: GPL v2 lub nowsza (kod m
 4. Dodaj osoby w zakładce Uprawnienia.
 5. Skopiuj adres serwera MCP i dodaj konektor w Claude.
 
+## Wiersz poleceń
+
+Z katalogu Perfexa, jako użytkownik strony: `php index.php menedzer_crm_ai/cli/status`, `cli/install`, `cli/update`, `cli/token <id pracownika> [read|work|full] [dni]` (poświadczenie pokazane raz), `cli/revoke <id połączenia>`. Przez przeglądarkę te adresy zwracają 404.
+
 ## Rozwój
 
 - Kod modułu: `menedzer_crm_ai/`. Testy: `tests/e2e.js` (Playwright, lokalny Perfex w Dockerze).

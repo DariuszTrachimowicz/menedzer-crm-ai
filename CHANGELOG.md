@@ -1,5 +1,10 @@
 # Zmiany
 
+## 0.1.1, 22 listopada 2026
+
+- Polecenia CLI dla administratora serwera: `token` (ręczne poświadczenie na te same zasady co w panelu, najwyżej rok), `revoke` (odcięcie połączenia), `update` (aktualizacja z najnowszego wydania).
+- Data ukończenia zadania zachowana przy ponownym ukończeniu i ustawiana przy utworzeniu zadania jako ukończone.
+
 ## 0.1.0, 22 listopada 2026
 
 - Pierwsza wersja: serwer MCP i OAuth 2.1 (rejestracja klienta, PKCE, rotowane tokeny, wykrywanie powtórek).

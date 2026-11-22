@@ -5,14 +5,14 @@ defined('BASEPATH') or exit('No direct script access allowed');
 /*
 Module Name: Menedżer CRM AI
 Description: Połączenia AI przez MCP i OAuth oraz praca na danych CRM z podglądem zmian i cofaniem z kopii.
-Version: 0.1.0
+Version: 0.1.1
 Author: Dariusz Trachimowicz
 Author URI: https://d-x.pl/
 Requires at least: 3.0.*
 */
 
 define('MCAI_MODULE', 'menedzer_crm_ai');
-define('MCAI_VERSION', '0.1.0');
+define('MCAI_VERSION', '0.1.1');
 
 require_once __DIR__ . '/libraries/Mcai.php';
 require_once __DIR__ . '/helpers.php';
