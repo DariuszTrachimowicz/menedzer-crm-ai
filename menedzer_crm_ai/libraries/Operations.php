@@ -246,6 +246,11 @@ final class Operations
                 if (!staff_can('edit', 'tasks', $sid) && !($assigned && array_keys($change) === ['status'])) {
                     throw $deny();
                 }
+                // Perfex zatrzymuje liczniki przy zamknięciu zadania; AI nie zamyka zadania z biegnącym licznikiem.
+                if (isset($change['status']) && (int) $change['status'] === 5
+                    && Store::db()->query('SELECT id FROM ' . db_prefix() . 'taskstimers WHERE task_id=? AND end_time IS NULL LOCK IN SHARE MODE', [(int) $current['id']])->num_rows() > 0) {
+                    throw $deny(_l('mcai_op_task_timer'));
+                }
                 if ((int) $current['visible_to_client'] === 1 && array_intersect(array_keys($change), ['name', 'description'])) {
                     throw $deny(_l('mcai_op_task_visible_edit'));
                 }
@@ -292,6 +297,13 @@ final class Operations
             case 'project.update':
                 if (!staff_can('edit', 'projects', $sid)) {
                     throw $deny();
+                }
+                return;
+            case 'lead.update':
+                // Jak Leads::lead(): lead zamieniony na klienta jest zablokowany dla osób bez praw administratora.
+                if (!is_admin($sid) && get_option('lead_lock_after_convert_to_customer') == 1
+                    && Store::db()->query('SELECT userid FROM ' . db_prefix() . 'clients WHERE leadid=? LOCK IN SHARE MODE', [(int) $current['id']])->num_rows() > 0) {
+                    throw $deny(_l('mcai_op_lead_locked'));
                 }
                 return;
         }

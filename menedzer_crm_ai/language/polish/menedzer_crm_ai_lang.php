@@ -150,3 +150,5 @@ $lang['mcai_op_bad_value'] = 'Nieprawidłowa wartość pola %s.';
 $lang['mcai_op_field_not_allowed'] = 'Pole %s nie jest dozwolone w tej akcji.';
 $lang['mcai_op_field_required'] = 'Brak wymaganego pola %s.';
 $lang['mcai_op_old_value_invalid'] = 'Poprzednia wartość pola %s jest dziś nieprawidłowa. Nie cofam.';
+$lang['mcai_op_task_timer'] = 'W zadaniu biegnie licznik czasu. Zatrzymaj go w panelu, a potem zamknij zadanie.';
+$lang['mcai_op_lead_locked'] = 'Lead został zamieniony na klienta i jest zablokowany; zmienia go administrator.';
