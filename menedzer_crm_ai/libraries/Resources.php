@@ -240,7 +240,10 @@ final class Resources
             case 'leads':
                 return ['notes' => self::rows("SELECT n.id,n.description,n.dateadded,$staffName AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type='lead' AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$id])];
             case 'tickets':
-                return ['replies' => self::rows("SELECT r.id,r.date,r.message,r.admin AS staff_id,r.contactid,r.name,r.email,$staffName AS staff_name FROM {$p}ticket_replies r LEFT JOIN {$p}staff s ON s.staffid=r.admin WHERE r.ticketid=? ORDER BY r.id", [$id])];
+                return [
+                    'replies' => self::rows("SELECT r.id,r.date,r.message,r.admin AS staff_id,r.contactid,r.name,r.email,$staffName AS staff_name FROM {$p}ticket_replies r LEFT JOIN {$p}staff s ON s.staffid=r.admin WHERE r.ticketid=? ORDER BY r.id", [$id]),
+                    'notes' => self::rows("SELECT n.id,n.description,n.dateadded,$staffName AS added_by FROM {$p}notes n LEFT JOIN {$p}staff s ON s.staffid=n.addedfrom WHERE n.rel_type='ticket' AND n.rel_id=? ORDER BY n.id DESC LIMIT 50", [$id]),
+                ];
             case 'tasks':
                 return [
                     'assignees' => self::rows("SELECT s.staffid,$staffName AS name FROM {$p}task_assigned a JOIN {$p}staff s ON s.staffid=a.staffid WHERE a.taskid=?", [$id]),

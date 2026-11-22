@@ -114,3 +114,4 @@ $lang['mcai_err_filter'] = 'This filter does not apply to this resource.';
 $lang['mcai_err_query'] = 'Enter at least 2 characters.';
 $lang['mcai_err_tool'] = 'This tool is not available for this connection.';
 $lang['mcai_err_server'] = 'Server error. Details are in the CRM log.';
+$lang['mcai_draft_reply'] = 'AI reply draft, to be sent by a staff member';

@@ -131,6 +131,81 @@ async function authorize(page, clientId, scope) {
   const gone = await rpc(ea, 'ping', {});
   check(gone.status === 401, 'po usunięciu z listy token Ewy nie działa', gone.status);
 
+  // 7. Zapisy: podgląd, wykonanie, sprawdzenie, cofnięcie
+  const a2 = await authorize(admin.page, client.client_id, 'full');
+  const T = a2.token.body.access_token;
+  const tl = (await rpc(T, 'tools/list', {})).body.result.tools.map((t) => t.name);
+  check(tl.includes('crm_operation_preview') && !tl.some((n) => /delete|remove|send/.test(n)), 'narzędzia zapisu są, usuwania i wysyłki brak', tl.join(','));
+  let key = 0;
+  const run = async (action, change, target_id) => {
+    const pv = await tool(T, 'crm_operation_preview', target_id ? { action, change, target_id } : { action, change });
+    if (pv.isError) return { pv, ex: { isError: true, data: pv.data } };
+    const ex = await tool(T, 'crm_operation_execute', { operation_id: pv.data.operation_id, confirm: true, idempotency_key: 'k' + (++key) });
+    return { pv, ex, key: 'k' + key };
+  };
+  const c1 = await run('task.create', { name: 'Zadanie od AI', assignees: [2], rel_type: 'customer', rel_id: 1, duedate: '2026-12-31' });
+  check(!c1.ex.isError && c1.ex.data.status === 'verified' && c1.ex.data.new_id > 0, 'task.create wykonane i sprawdzone', JSON.stringify(c1.ex.data));
+  const nt = await tool(T, 'crm_resource_get', { resource: 'tasks', id: c1.ex.data.new_id });
+  check(nt.data.item && nt.data.item.name === 'Zadanie od AI' && nt.data.related.assignees.some((x) => Number(x.staffid) === 2), 'nowe zadanie ma przypisaną osobę');
+  const same = await tool(T, 'crm_operation_execute', { operation_id: c1.pv.data.operation_id, confirm: true, idempotency_key: c1.key });
+  check(!same.isError && same.data.new_id === c1.ex.data.new_id, 'ponowienie z tym samym kluczem zwraca ten sam wynik');
+  const other = await tool(T, 'crm_operation_execute', { operation_id: c1.pv.data.operation_id, confirm: true, idempotency_key: 'inny' });
+  check(other.isError && other.data.error === 'already_executed', 'inny klucz nie wykona drugi raz');
+  const rb1 = await tool(T, 'crm_operation_rollback', { operation_id: c1.pv.data.operation_id, confirm: true });
+  check(!rb1.isError && rb1.data.status === 'rolled_back', 'cofnięcie utworzenia zadania', JSON.stringify(rb1.data));
+  const gone2 = await tool(T, 'crm_resource_get', { resource: 'tasks', id: c1.ex.data.new_id });
+  check(gone2.isError && gone2.data.error === 'not_found', 'po cofnięciu zadania nie ma');
+
+  const u1 = await run('task.update', { status: 5 }, 1);
+  check(!u1.ex.isError && u1.pv.data.before.status === '1', 'task.update status z podglądem stanu przed', JSON.stringify(u1.pv.data.before || u1.ex.data));
+  const t1 = await tool(T, 'crm_resource_get', { resource: 'tasks', id: 1 });
+  check(t1.data.item.status === '5' && !!t1.data.item.datefinished, 'status 5 i data ukończenia ustawione');
+  const rb2 = await tool(T, 'crm_operation_rollback', { operation_id: u1.pv.data.operation_id, confirm: true });
+  const t1b = await tool(T, 'crm_resource_get', { resource: 'tasks', id: 1 });
+  check(!rb2.isError && t1b.data.item.status === '1' && !t1b.data.item.datefinished, 'cofnięcie przywraca status i datę', JSON.stringify(rb2.data));
+
+  const pA = await tool(T, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Wersja A' } });
+  const pB = await run('task.update', { name: 'Wersja B' }, 1);
+  const exA = await tool(T, 'crm_operation_execute', { operation_id: pA.data.operation_id, confirm: true, idempotency_key: 'A' });
+  check(exA.isError && exA.data.error === 'conflict', 'zmiana po podglądzie = konflikt, bez nadpisania', JSON.stringify(exA.data));
+  await tool(T, 'crm_operation_rollback', { operation_id: pB.pv.data.operation_id, confirm: true });
+
+  const d1 = await run('ticket.draft_reply', { message: 'Dzień dobry, proszę spróbować zresetować hasło.' }, 1);
+  const tk2 = await tool(T, 'crm_resource_get', { resource: 'tickets', id: 1 });
+  check(!d1.ex.isError && tk2.data.related.notes.length >= 1 && tk2.data.related.replies.length === 0, 'szkic odpowiedzi jako notatka, bez odpowiedzi do klienta', JSON.stringify(d1.ex.data));
+
+  const cc = await run('customer.create', { company: 'Firma od AI', city: 'Kraków' });
+  const ko = await run('contact.create', { userid: cc.ex.data.new_id, firstname: 'Ala', lastname: 'Nowa', email: 'ala@nowa.test' });
+  check(!ko.ex.isError, 'kontakt dla nowego klienta', JSON.stringify(ko.ex.data));
+  const dup = await tool(T, 'crm_operation_preview', { action: 'contact.create', change: { userid: 1, firstname: 'X', lastname: 'Y', email: 'ala@nowa.test' } });
+  check(dup.isError && /istnieje/.test(dup.data.message), 'duplikat e-maila kontaktu odrzucony');
+  const rbC = await tool(T, 'crm_operation_rollback', { operation_id: cc.pv.data.operation_id, confirm: true });
+  check(rbC.isError && rbC.data.error === 'conflict', 'klienta z kontaktem nie da się cofnąć');
+  await tool(T, 'crm_operation_rollback', { operation_id: ko.pv.data.operation_id, confirm: true });
+  const rbC2 = await tool(T, 'crm_operation_rollback', { operation_id: cc.pv.data.operation_id, confirm: true });
+  check(!rbC2.isError, 'po cofnięciu kontaktu klient też się cofa', JSON.stringify(rbC2.data));
+
+  const badField = await tool(T, 'crm_operation_preview', { action: 'customer.update', target_id: 1, change: { active: 0 } });
+  check(badField.isError && badField.data.error === 'invalid_change', 'pole spoza listy (active) odrzucone');
+  const group = Number((await tool(T, 'crm_inventory')).data.lookups.kb_groups[0].id);
+  const kb = await run('kb.create', { subject: 'Jak zresetować hasło', description: '<p>Kroki</p><script>alert(1)</script>', articlegroup: group });
+  const kbg = await tool(T, 'crm_resource_get', { resource: 'knowledge_base', id: kb.ex.data.new_id });
+  check(kbg.data.item && kbg.data.item.active === '0' && !/script/.test(kbg.data.item.description), 'artykuł jako szkic, bez skryptu', JSON.stringify(kb.ex.data));
+
+  // 8. Ewa na poziomie Praca: komentarz tak, nowy klient nie
+  await admin.page.goto(BASE + '/admin/menedzer_crm_ai?tab=operators');
+  await admin.page.selectOption('form[action$="operator_save"] select[name=staff_id]', '2');
+  await admin.page.selectOption('form[action$="operator_save"]:has(select[name=staff_id]) select[name=level]', 'work');
+  await Promise.all([admin.page.waitForNavigation(), admin.page.click('form[action$="operator_save"]:has(select[name=staff_id]) button')]);
+  const e2 = await authorize(ewa.page, client.client_id, 'work');
+  const E = e2.token.body.access_token;
+  const ecom = await tool(E, 'crm_operation_preview', { action: 'task.comment', target_id: 1, change: { content: 'Zrobione w połowie' } });
+  check(!ecom.isError, 'Ewa może skomentować swoje zadanie', JSON.stringify(ecom.data));
+  const ecust = await tool(E, 'crm_operation_preview', { action: 'customer.create', change: { company: 'X' } });
+  check(ecust.isError, 'Ewa (Praca) nie tworzy klientów', JSON.stringify(ecust.data));
+  const eupd = await tool(E, 'crm_operation_preview', { action: 'task.update', target_id: 1, change: { name: 'Zmiana' } });
+  check(eupd.isError && eupd.data.error === 'forbidden', 'Ewa bez prawa edycji zadań zmienia tylko status', JSON.stringify(eupd.data));
+
   await browser.close();
   console.log(failures ? `\n${failures} błędów` : '\nWSZYSTKO OK');
   process.exit(failures ? 1 : 0);
